@@ -4,6 +4,8 @@ from lib.database import Database
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import insert
 from typing import Optional
+from utils.resource_utils import add_resource, delete_resource, get_resource
+
 
 router = APIRouter(
     prefix="/user",
@@ -25,6 +27,7 @@ class UserCreate(BaseModel):
 
 @router.post("/", tags=["Create user"])
 async def create_user(user: UserCreate):
+
     stmt = insert(table["user"]).values(
         account_id=user.account_id,
         first_name=user.first_name,

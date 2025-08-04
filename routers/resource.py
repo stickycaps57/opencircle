@@ -1,85 +1,85 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Path
-from lib.database import Database
-from sqlalchemy import insert, delete
-from sqlalchemy.exc import IntegrityError
-import shutil
-import os
-import uuid
+from fastapi import APIRouter, UploadFile, File, HTTPException, Path, Query
+from utils.resource_utils import add_resource, delete_resource, get_resource
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from fastapi.responses import FileResponse
 
 router = APIRouter(
     prefix="/resource",
     tags=["resource"],
 )
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-db = Database()
-table = db.tables
-session = db.session
-
-
-@router.post("/upload", tags=["Upload resource"])
+@router.post("/upload", tags=["Upload photo"])
 async def upload_photo(
     file: UploadFile = File(...),
     uploader_uuid: str = File(..., description="Uploader UUID"),
 ):
-    # Generate a unique filename using uploader's UUID and a random UUID
-    original_ext = os.path.splitext(file.filename)[1]
-    unique_id = uuid.uuid4().hex
-    new_filename = f"{uploader_uuid}_{unique_id}{original_ext}"
-
-    file_location = os.path.join(UPLOAD_DIR, new_filename)
     try:
-        with open(file_location, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        # Insert file record into the resource table
-        stmt = insert(table["resource"]).values(
-            directory=os.path.join(UPLOAD_DIR, new_filename)
-        )
-        result = session.execute(stmt)
-        session.commit()
-        resource_id = result.inserted_primary_key[0]
+        resource_id = add_resource(file, uploader_uuid)
+
         return {
             "message": "Photo uploaded successfully",
             "resource_id": resource_id,
-            "filename": new_filename,
         }
-    except IntegrityError:
-        session.rollback()
-        raise HTTPException(status_code=400, detail="Resource already exists")
+
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail="File not found")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    except IntegrityError as e:
+        raise HTTPException(status_code=409, detail="Integrity error: " + str(e.orig))
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
     except Exception as e:
-        session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
 
 
-@router.delete("/{resource_id}", tags=["Delete resource"])
+@router.delete("/{resource_id}", tags=["Delete photo"])
 async def delete_photo(
-    resource_id: int = Path(..., description="The ID of the resource to delete")
+    resource_id: int = Path(..., description="The ID of the resource to delete"),
+    uploader_uuid: str = Query(..., description="Uploader UUID"),
 ):
-    # Get file path from DB
-    resource = (
-        session.query(table["resource"])
-        .filter(table["resource"].c.id == resource_id)
-        .first()
-    )
-    if not resource:
-        session.close()
-        raise HTTPException(status_code=404, detail="Resource not found")
-    file_path = resource.path
     try:
-        # Delete DB record
-        stmt = delete(table["resource"]).where(table["resource"].c.id == resource_id)
-        session.execute(stmt)
-        session.commit()
-        # Delete file from disk
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
+        delete_resource(resource_id, uploader_uuid)
         return {"message": "Photo deleted successfully"}
+
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Access denied to resource")
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except IOError as e:
+        raise HTTPException(status_code=500, detail="IO error: " + str(e))
     except Exception as e:
-        session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
+
+
+@router.get("/{resource_id}", tags=["Get photo by ID"])
+async def get_photo(
+    resource_id: int = Path(..., description="The ID of the resource to retrieve"),
+):
+    try:
+        resource = get_resource(resource_id)
+        return FileResponse(
+            path=resource["file_path"],
+            filename=resource["filename"],
+            media_type="application/octet-stream",
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/info/{resource_id}", tags=["Get photo information by ID"])
+async def get_photo(
+    resource_id: int = Path(..., description="The ID of the resource to retrieve"),
+):
+    try:
+        return get_resource(resource_id)
+
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
