@@ -1,3 +1,18 @@
+-- opencircle.address definition
+
+CREATE TABLE `address` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `country` varchar(255) NOT NULL,
+  `province` varchar(255) NOT NULL,
+  `city` varchar(255) NOT NULL,
+  `barangay` varchar(255) NOT NULL,
+  `house_building_number` varchar(255) NOT NULL,
+  `created_date` datetime NOT NULL DEFAULT current_timestamp(),
+  `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+
+
 -- opencircle.resource definition
 
 CREATE TABLE `resource` (
@@ -6,7 +21,7 @@ CREATE TABLE `resource` (
   `filename` varchar(100) NOT NULL,
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=21 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+) ENGINE=InnoDB AUTO_INCREMENT=25 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 
 -- opencircle.`role` definition
@@ -29,6 +44,7 @@ CREATE TABLE `account` (
   `password` varchar(255) NOT NULL,
   `role_id` int(11) NOT NULL,
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
+  `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `account_email_IDX` (`email`) USING BTREE,
   UNIQUE KEY `account_uuid_IDX` (`uuid`) USING BTREE,
@@ -71,7 +87,7 @@ CREATE TABLE `post` (
   KEY `post_resource_FK` (`image`),
   CONSTRAINT `post_account_FK` FOREIGN KEY (`author`) REFERENCES `account` (`id`) ON DELETE CASCADE,
   CONSTRAINT `post_resource_FK` FOREIGN KEY (`image`) REFERENCES `resource` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 
 -- opencircle.`session` definition
@@ -89,7 +105,7 @@ CREATE TABLE `session` (
   UNIQUE KEY `session_token` (`session_token`),
   KEY `session_account_FK` (`account_uuid`),
   CONSTRAINT `session_account_FK` FOREIGN KEY (`account_uuid`) REFERENCES `account` (`uuid`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 
 -- opencircle.`user` definition
@@ -113,19 +129,25 @@ CREATE TABLE `user` (
 
 -- opencircle.event definition
 
+-- opencircle.event definition
+
 CREATE TABLE `event` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `organization_id` bigint(20) NOT NULL,
   `title` varchar(255) NOT NULL,
   `event_date` datetime NOT NULL,
+  `address_id` bigint(20) NOT NULL,
   `description` text NOT NULL,
   `image` bigint(20) DEFAULT NULL,
   `is_autoaccept` tinyint(1) NOT NULL DEFAULT 1,
+  `status` enum('active','postponed') NOT NULL DEFAULT 'active',
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
   `last_modified_date` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `event_organization_FK` (`organization_id`),
   KEY `event_resource_FK` (`image`),
+  KEY `event_address_FK` (`address_id`),
+  CONSTRAINT `event_address_FK` FOREIGN KEY (`address_id`) REFERENCES `address` (`id`),
   CONSTRAINT `event_organization_FK` FOREIGN KEY (`organization_id`) REFERENCES `organization` (`id`) ON DELETE CASCADE,
   CONSTRAINT `event_resource_FK` FOREIGN KEY (`image`) REFERENCES `resource` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
@@ -137,7 +159,7 @@ CREATE TABLE `rsvp` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `event_id` bigint(20) NOT NULL,
   `attendee` bigint(20) NOT NULL,
-  `status` enum('accepted','rejected','waitlisted','pending') NOT NULL DEFAULT 'pending',
+  `status` enum('joined','rejected','waitlisted','pending') NOT NULL DEFAULT 'pending',
   `created_date` datetime DEFAULT current_timestamp(),
   `last_modified_date` datetime DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
@@ -148,9 +170,9 @@ CREATE TABLE `rsvp` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 
--- opencircle.comments definition
+-- opencircle.comment definition
 
-CREATE TABLE `comments` (
+CREATE TABLE `comment` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `event_id` bigint(20) DEFAULT NULL,
   `post_id` bigint(20) DEFAULT NULL,
