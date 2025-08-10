@@ -147,3 +147,57 @@ async def delete_comment(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+
+@router.get("/event/{event_id}", tags=["Get Comments for Event"])
+async def get_comments_for_event(event_id: int, limit: int = 10):
+    try:
+        comments = (
+            session.query(table["comment"])
+            .filter(table["comment"].c.event_id == event_id)
+            .order_by(table["comment"].c.created_date.desc())
+            .limit(limit)
+            .all()
+        )
+        result = [
+            {
+                "id": c.id,
+                "author": c.author,
+                "message": c.message,
+                "created_date": getattr(c, "created_date", None),
+                "last_modified_date": getattr(c, "last_modified_date", None),
+            }
+            for c in comments
+        ]
+        return {"comments": result}
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    finally:
+        session.close()
+
+
+@router.get("/post/{post_id}", tags=["Get Comments for Post"])
+async def get_comments_for_post(post_id: int, limit: int = 10):
+    try:
+        comments = (
+            session.query(table["comment"])
+            .filter(table["comment"].c.post_id == post_id)
+            .order_by(table["comment"].c.created_date.desc())
+            .limit(limit)
+            .all()
+        )
+        result = [
+            {
+                "id": c.id,
+                "author": c.author,
+                "message": c.message,
+                "created_date": getattr(c, "created_date", None),
+                "last_modified_date": getattr(c, "last_modified_date", None),
+            }
+            for c in comments
+        ]
+        return {"comments": result}
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    finally:
+        session.close()

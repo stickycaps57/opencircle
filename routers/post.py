@@ -75,6 +75,7 @@ async def get_posts(
         post_stmt = (
             select(table["post"])
             .where(table["post"].c.author == account_id)
+            .order_by(table["post"].c.created_date.desc())
             .limit(page_size)
             .offset(offset)
         )

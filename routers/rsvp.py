@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Form
 from lib.database import Database
-from sqlalchemy import insert
+from sqlalchemy import insert, update, delete
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 router = APIRouter(
@@ -48,8 +48,6 @@ async def create_rsvp(
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
 
 
 @router.get("/event/{event_id}", tags=["Get RSVPs for Event"])
@@ -85,7 +83,7 @@ async def get_rsvps_for_event(
 
 
 @router.get("/attendees/{event_id}", tags=["Get Attendees of an Event"])
-async def get_rsvps_for_event(
+async def get_attendees_for_event(
     event_id: int,
 ):
     try:
@@ -121,6 +119,107 @@ async def get_rsvps_for_event(
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.put("/status/{rsvp_id}", tags=["Update RSVP Status"])
+async def update_rsvp_status(
+    rsvp_id: int,
+    account_uuid: str = Form(...),
+    status: str = Form(...),
+):
+    # Get account_id from uuid
+    account = session.query(table["account"]).filter_by(uuid=account_uuid).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    account_id = account.id
+
+    # Only allow update if the account is the Organization who owns the event
+    # and the account is linked to the organization_id under the Event table
+    event = (
+        session.query(table["event"])
+        .join(table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id)
+        .filter(table["rsvp"].c.id == rsvp_id)
+        .first()
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found for RSVP")
+    # Check if account is linked to the event's organization
+    org = session.query(table["organization"]).filter_by(account_id=account_id).first()
+
+    if not org or getattr(org, "id", None) != getattr(event, "organization_id", None):
+        raise HTTPException(
+            status_code=403, detail="Account not linked to event's organization"
+        )
+    stmt = (
+        update(table["rsvp"]).where(table["rsvp"].c.id == rsvp_id).values(status=status)
+    )
+    try:
+        result = session.execute(stmt)
+        session.commit()
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="RSVP not found or not owned by the Organization",
+            )
+        return {"message": "RSVP status updated successfully"}
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.delete("/{rsvp_id}", tags=["Delete RSVP"])
+async def delete_rsvp(
+    rsvp_id: int,
+    account_uuid: str = Form(...),
+):
+    try:
+        # Get RSVP and related event
+        rsvp = session.query(table["rsvp"]).filter_by(id=rsvp_id).first()
+        if not rsvp:
+            raise HTTPException(status_code=404, detail="RSVP not found")
+        event = session.query(table["event"]).filter_by(id=rsvp.event_id).first()
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found for RSVP")
+
+        account = session.query(table["account"]).filter_by(uuid=account_uuid).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        is_rsvp_creator = rsvp.attendee == account.id
+        is_event_organizer = False
+        if not is_rsvp_creator:
+            org = (
+                session.query(table["organization"])
+                .filter_by(account_id=account.id)
+                .first()
+            )
+            if org and org.id == event.organization_id:
+                is_event_organizer = True
+
+        if not (is_rsvp_creator or is_event_organizer):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the RSVP creator or event organizer can delete this RSVP",
+            )
+
+        stmt = delete(table["rsvp"]).where(table["rsvp"].c.id == rsvp_id)
+        session.execute(stmt)
+        session.commit()
+        return {"message": "RSVP deleted successfully"}
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
