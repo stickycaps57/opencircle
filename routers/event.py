@@ -758,3 +758,499 @@ async def get_events_by_month_year(
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/by_status_with_comments", tags=["Get Events By Status With Comments"])
+async def get_events_by_status_with_comments(
+    status: str = Query(
+        "active", description="Event status (e.g., active, cancelled, etc.)"
+    ),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Events per page (max 100)"),
+):
+    try:
+        offset = (page - 1) * limit
+
+        # Get total count for pagination info
+        count_stmt = (
+            select(func.count())
+            .select_from(table["event"])
+            .where(
+                (table["event"].c.status == status)
+                & (table["event"].c.event_date >= func.current_date())
+            )
+        )
+        total_events = session.execute(count_stmt).scalar()
+
+        # Get paginated events by status
+        select_events = (
+            select(table["event"])
+            .where(
+                (table["event"].c.status == status)
+                & (table["event"].c.event_date >= func.current_date())
+            )
+            .order_by(table["event"].c.event_date.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        events_result = session.execute(select_events).fetchall()
+        events = [dict(row._mapping) for row in events_result]
+
+        # For each event, get top 3 latest comments
+        for event in events:
+            event_id = event["id"]
+            comments_stmt = (
+                select(
+                    table["comment"].c.id.label("comment_id"),
+                    table["comment"].c.message,
+                    table["comment"].c.created_date,
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                )
+                .select_from(
+                    table["comment"]
+                    .join(
+                        table["account"],
+                        table["comment"].c.author == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                )
+                .where(table["comment"].c.event_id == event_id)
+                .order_by(table["comment"].c.created_date.desc())
+                .limit(3)
+            )
+            comments_result = session.execute(comments_stmt).fetchall()
+            latest_comments = []
+            for row in comments_result:
+                latest_comments.append(
+                    {
+                        "comment_id": row._mapping["comment_id"],
+                        "message": row._mapping["message"],
+                        "created_date": row._mapping["created_date"],
+                        "account": {
+                            "id": row._mapping["account_id"],
+                            "uuid": row._mapping["uuid"],
+                            "email": row._mapping["email"],
+                        },
+                        "user": {
+                            "first_name": row._mapping["first_name"],
+                            "last_name": row._mapping["last_name"],
+                        },
+                    }
+                )
+            event["latest_comments"] = latest_comments
+
+        return {
+            "events": events,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_events,
+                "pages": (total_events + limit - 1) // limit,
+            },
+        }
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/random_with_comments", tags=["Get Random Events With Comments"])
+async def get_random_events_with_comments(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(5, ge=1, le=20, description="Events per page (max 20)"),
+):
+    try:
+        offset = (page - 1) * limit
+
+        # Get total count for pagination info (any status, any date)
+        count_stmt = select(func.count()).select_from(table["event"])
+        total_events = session.execute(count_stmt).scalar()
+
+        # Select random events and join organization table
+        random_events_stmt = (
+            select(
+                table["event"],
+                table["organization"].c.id.label("org_id"),
+                table["organization"].c.name.label("org_name"),
+                table["organization"].c.description.label("org_description"),
+                table["organization"].c.logo.label("org_logo"),
+            )
+            .select_from(
+                table["event"].join(
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
+                )
+            )
+            .order_by(func.rand())
+            .limit(limit)
+            .offset(offset)
+        )
+        events_result = session.execute(random_events_stmt).fetchall()
+        events = []
+        for row in events_result:
+            event_data = dict(row._mapping)
+            # Group organization details
+            event_data["organization"] = {
+                "id": event_data.pop("org_id"),
+                "name": event_data.pop("org_name"),
+                "description": event_data.pop("org_description"),
+                "logo": event_data.pop("org_logo"),
+            }
+            events.append(event_data)
+
+        # For each event, get top 3 latest comments
+        for event in events:
+            event_id = event["id"]
+            comments_stmt = (
+                select(
+                    table["comment"].c.id.label("comment_id"),
+                    table["comment"].c.message,
+                    table["comment"].c.created_date,
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                )
+                .select_from(
+                    table["comment"]
+                    .join(
+                        table["account"],
+                        table["comment"].c.author == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                )
+                .where(table["comment"].c.event_id == event_id)
+                .order_by(table["comment"].c.created_date.desc())
+                .limit(3)
+            )
+            comments_result = session.execute(comments_stmt).fetchall()
+            latest_comments = []
+            for row in comments_result:
+                latest_comments.append(
+                    {
+                        "comment_id": row._mapping["comment_id"],
+                        "message": row._mapping["message"],
+                        "created_date": row._mapping["created_date"],
+                        "account": {
+                            "id": row._mapping["account_id"],
+                            "uuid": row._mapping["uuid"],
+                            "email": row._mapping["email"],
+                        },
+                        "user": {
+                            "first_name": row._mapping["first_name"],
+                            "last_name": row._mapping["last_name"],
+                        },
+                    }
+                )
+            event["latest_comments"] = latest_comments
+
+        return {
+            "random_events": events,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_events,
+                "pages": (total_events + limit - 1) // limit,
+            },
+        }
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/user/rsvped", tags=["Get User RSVPed Events By Month and Year"])
+async def get_user_rsvped_events_by_month_year(
+    account_uuid: str = Query(..., description="Account UUID of the user"),
+    month: int = Query(..., ge=1, le=12, description="Month (1-12)"),
+    year: int = Query(..., ge=1900, description="Year (e.g., 2024)"),
+):
+    try:
+        # Get account_id from uuid
+        select_account = select(table["account"].c.id).where(
+            table["account"].c.uuid == account_uuid
+        )
+        account_id = session.execute(select_account).scalar()
+        if account_id is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # Helper for filtering by month/year
+        def month_year_filter(col):
+            return (
+                func.extract("month", col) == month,
+                func.extract("year", col) == year,
+            )
+
+        # Fetch events where user has RSVP
+        stmt = (
+            select(table["event"], table["rsvp"].c.status.label("rsvp_status"))
+            .select_from(
+                table["event"].join(
+                    table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id
+                )
+            )
+            .where(
+                (table["rsvp"].c.attendee == account_id)
+                & month_year_filter(table["event"].c.event_date)[0]
+                & month_year_filter(table["event"].c.event_date)[1]
+            )
+            .order_by(table["event"].c.event_date.desc())
+        )
+        events_result = session.execute(stmt).fetchall()
+        events = []
+        for row in events_result:
+            event_data = dict(row._mapping)
+            events.append(event_data)
+
+        return {"rsvped_events": events}
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/user/events_with_comments", tags=["Get User Events With Comments"])
+async def get_user_events_with_comments(
+    account_uuid: str = Query(..., description="Account UUID of the user"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Events per page (max 100)"),
+):
+    try:
+        offset = (page - 1) * limit
+
+        # Get account_id from uuid
+        select_account = select(table["account"].c.id).where(
+            table["account"].c.uuid == account_uuid
+        )
+        account_id = session.execute(select_account).scalar()
+        if account_id is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # Get total count for pagination
+        count_stmt = (
+            select(func.count())
+            .select_from(
+                table["event"].join(
+                    table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id
+                )
+            )
+            .where(table["rsvp"].c.attendee == account_id)
+        )
+        total_events = session.execute(count_stmt).scalar()
+
+        # Fetch paginated events linked to user (via RSVP)
+        events_stmt = (
+            select(table["event"])
+            .select_from(
+                table["event"].join(
+                    table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id
+                )
+            )
+            .where(table["rsvp"].c.attendee == account_id)
+            .order_by(table["event"].c.event_date.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        events_result = session.execute(events_stmt).fetchall()
+        events = [dict(row._mapping) for row in events_result]
+
+        # For each event, fetch latest 3 comments
+        for event in events:
+            event_id = event["id"]
+            comments_stmt = (
+                select(
+                    table["comment"].c.id.label("comment_id"),
+                    table["comment"].c.message,
+                    table["comment"].c.created_date,
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                )
+                .select_from(
+                    table["comment"]
+                    .join(
+                        table["account"],
+                        table["comment"].c.author == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                )
+                .where(table["comment"].c.event_id == event_id)
+                .order_by(table["comment"].c.created_date.desc())
+                .limit(3)
+            )
+            comments_result = session.execute(comments_stmt).fetchall()
+            latest_comments = []
+            for row in comments_result:
+                latest_comments.append(
+                    {
+                        "comment_id": row._mapping["comment_id"],
+                        "message": row._mapping["message"],
+                        "created_date": row._mapping["created_date"],
+                        "account": {
+                            "id": row._mapping["account_id"],
+                            "uuid": row._mapping["uuid"],
+                            "email": row._mapping["email"],
+                        },
+                        "user": {
+                            "first_name": row._mapping["first_name"],
+                            "last_name": row._mapping["last_name"],
+                        },
+                    }
+                )
+            event["latest_comments"] = latest_comments
+
+        return {
+            "events": events,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_events,
+                "pages": (total_events + limit - 1) // limit,
+            },
+        }
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/user/events_by_rsvp_status_with_comments",
+    tags=["Get User Events By RSVP Status With Comments"],
+)
+async def get_user_events_by_rsvp_status_with_comments(
+    account_uuid: str = Query(..., description="Account UUID of the user"),
+    rsvp_status: str = Query(
+        ..., description="RSVP status (e.g., joined, pending, declined)"
+    ),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Events per page (max 100)"),
+):
+    try:
+        offset = (page - 1) * limit
+
+        # Get account_id from uuid
+        select_account = select(table["account"].c.id).where(
+            table["account"].c.uuid == account_uuid
+        )
+        account_id = session.execute(select_account).scalar()
+        if account_id is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # Get total count for pagination
+        count_stmt = (
+            select(func.count())
+            .select_from(
+                table["event"].join(
+                    table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id
+                )
+            )
+            .where(
+                (table["rsvp"].c.attendee == account_id)
+                & (table["rsvp"].c.status == rsvp_status)
+                & (table["event"].c.status == "active")
+                & (table["event"].c.event_date >= func.current_date())
+            )
+        )
+        total_events = session.execute(count_stmt).scalar()
+
+        # Fetch paginated events where RSVP matches status and event is active
+        events_stmt = (
+            select(table["event"])
+            .select_from(
+                table["event"].join(
+                    table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id
+                )
+            )
+            .where(
+                (table["rsvp"].c.attendee == account_id)
+                & (table["rsvp"].c.status == rsvp_status)
+                & (table["event"].c.status == "active")
+                & (table["event"].c.event_date >= func.current_date())
+            )
+            .order_by(table["event"].c.event_date.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        events_result = session.execute(events_stmt).fetchall()
+        events = [dict(row._mapping) for row in events_result]
+
+        # For each event, fetch latest 3 comments
+        for event in events:
+            event_id = event["id"]
+            comments_stmt = (
+                select(
+                    table["comment"].c.id.label("comment_id"),
+                    table["comment"].c.message,
+                    table["comment"].c.created_date,
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                )
+                .select_from(
+                    table["comment"]
+                    .join(
+                        table["account"],
+                        table["comment"].c.author == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                )
+                .where(table["comment"].c.event_id == event_id)
+                .order_by(table["comment"].c.created_date.desc())
+                .limit(3)
+            )
+            comments_result = session.execute(comments_stmt).fetchall()
+            latest_comments = []
+            for row in comments_result:
+                latest_comments.append(
+                    {
+                        "comment_id": row._mapping["comment_id"],
+                        "message": row._mapping["message"],
+                        "created_date": row._mapping["created_date"],
+                        "account": {
+                            "id": row._mapping["account_id"],
+                            "uuid": row._mapping["uuid"],
+                            "email": row._mapping["email"],
+                        },
+                        "user": {
+                            "first_name": row._mapping["first_name"],
+                            "last_name": row._mapping["last_name"],
+                        },
+                    }
+                )
+            event["latest_comments"] = latest_comments
+
+        return {
+            "events": events,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_events,
+                "pages": (total_events + limit - 1) // limit,
+            },
+        }
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

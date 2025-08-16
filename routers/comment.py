@@ -150,15 +150,15 @@ async def delete_comment(
 
 
 @router.get("/event/{event_id}", tags=["Get Comments for Event"])
-async def get_comments_for_event(event_id: int, limit: int = 10):
+async def get_comments_for_event(event_id: int, limit: int = 10, offset: int = 0):
     try:
-        comments = (
+        query = (
             session.query(table["comment"])
             .filter(table["comment"].c.event_id == event_id)
             .order_by(table["comment"].c.created_date.desc())
-            .limit(limit)
-            .all()
         )
+        total = query.count()
+        comments = query.offset(offset).limit(limit).all()
         result = [
             {
                 "id": c.id,
@@ -169,7 +169,7 @@ async def get_comments_for_event(event_id: int, limit: int = 10):
             }
             for c in comments
         ]
-        return {"comments": result}
+        return {"comments": result, "total": total, "limit": limit, "offset": offset}
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
     finally:
@@ -177,15 +177,15 @@ async def get_comments_for_event(event_id: int, limit: int = 10):
 
 
 @router.get("/post/{post_id}", tags=["Get Comments for Post"])
-async def get_comments_for_post(post_id: int, limit: int = 10):
+async def get_comments_for_post(post_id: int, limit: int = 10, offset: int = 0):
     try:
-        comments = (
+        query = (
             session.query(table["comment"])
             .filter(table["comment"].c.post_id == post_id)
             .order_by(table["comment"].c.created_date.desc())
-            .limit(limit)
-            .all()
         )
+        total = query.count()
+        comments = query.offset(offset).limit(limit).all()
         result = [
             {
                 "id": c.id,
@@ -196,7 +196,7 @@ async def get_comments_for_post(post_id: int, limit: int = 10):
             }
             for c in comments
         ]
-        return {"comments": result}
+        return {"comments": result, "total": total, "limit": limit, "offset": offset}
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
     finally:

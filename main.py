@@ -2,7 +2,17 @@ from fastapi import FastAPI
 
 # from .dependencies import get_query_token, get_token_header
 # from .internal import admin
-from routers import account, resource, user, session, post, event, rsvp, comment
+from routers import (
+    account,
+    resource,
+    user,
+    session,
+    post,
+    event,
+    rsvp,
+    comment,
+    organization,
+)
 
 # app = FastAPI(dependencies=[Depends(get_query_token)])
 app = FastAPI()
@@ -14,6 +24,7 @@ app.include_router(post.router)
 app.include_router(event.router)
 app.include_router(rsvp.router)
 app.include_router(comment.router)
+app.include_router(organization.router)
 
 
 @app.get("/")
