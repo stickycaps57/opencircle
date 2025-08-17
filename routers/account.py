@@ -1,8 +1,18 @@
-from fastapi import APIRouter, HTTPException, Path, UploadFile, File, Form, Request
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Path,
+    UploadFile,
+    File,
+    Form,
+    Request,
+    Response,
+    Cookie,
+)
 from pydantic import EmailStr, constr
 from lib.database import Database
 from lib.models import UserModel, OrganizationModel
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import insert, select
 import uuid
 import bcrypt
@@ -11,7 +21,7 @@ from utils.organization_utils import create_organization
 import jwt
 import os
 from datetime import datetime, timedelta, timezone
-from utils.session_utils import add_session
+from utils.session_utils import add_session, delete_session
 
 router = APIRouter(
     prefix="/account",
@@ -131,15 +141,35 @@ async def create_organization_account(
 
 @router.delete("/uuid/{account_uuid}", tags=["Delete Account"])
 async def delete_account_by_uuid(
-    account_uuid: str = Path(..., description="The UUID of the account to delete")
+    account_uuid: str = Path(..., description="The UUID of the account to delete"),
+    session_token: str = Cookie(None),
 ):
-    stmt = table["account"].delete().where(table["account"].c.uuid == account_uuid)
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+    # Get session from database
+    stmt = select(table["session"]).where(
+        table["session"].c.session_token == session_token
+    )
+    session_result = session.execute(stmt).first()
+    if not session_result:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    session_data = session_result._mapping
+    # Check if session's account_uuid matches the account_uuid to delete
+    if session_data["account_uuid"] != account_uuid:
+        raise HTTPException(
+            status_code=403, detail="You are not authorized to delete this account"
+        )
+    # Proceed with deletion
+    delete_stmt = (
+        table["account"].delete().where(table["account"].c.uuid == account_uuid)
+    )
     try:
-        result = session.execute(stmt)
+        result = session.execute(delete_stmt)
         session.commit()
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Account not found")
-        # TODO: double check if to cascade delete resource is needed
+        # Optionally, delete session after account deletion
+        delete_session(session_token)
         return {"message": "Account deleted successfully"}
     except Exception as e:
         session.rollback()
@@ -157,6 +187,7 @@ async def user_sign_in(
     email: EmailStr = Form(...),
     password: constr(min_length=8) = Form(...),
     request: Request = None,
+    response: Response = None,
 ):
     # Find account by email
     stmt = select(table["account"]).where(table["account"].c.email == email)
@@ -171,19 +202,50 @@ async def user_sign_in(
     ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # Get user details linked to account
-    user_stmt = select(table["user"]).where(table["user"].c.account_id == account["id"])
+    # Get user details linked to account, join resource for profile picture
+    user_stmt = (
+        select(
+            table["user"].c.id,
+            table["user"].c.account_id,
+            table["user"].c.first_name,
+            table["user"].c.last_name,
+            table["user"].c.bio,
+            table["user"].c.profile_picture,
+            table["resource"].c.directory.label("profile_picture_directory"),
+            table["resource"].c.filename.label("profile_picture_filename"),
+        )
+        .select_from(
+            table["user"].outerjoin(
+                table["resource"],
+                table["user"].c.profile_picture == table["resource"].c.id,
+            )
+        )
+        .where(table["user"].c.account_id == account["id"])
+    )
     user_result = session.execute(user_stmt).first()
     if not user_result:
         raise HTTPException(status_code=404, detail="User not found for this account")
     user = user_result._mapping
 
+    # Create session and set cookie
     session_details = add_session(
         account_uuid=account["uuid"],
         request=request,
     )
+    session_token = session_details["session_token"]
+    expires_at = session_details["expires_at"]
 
-    # Return user details and session token
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=True,  # Set to True in production
+        samesite="Lax",
+        path="/",
+        expires=expires_at,
+    )
+
+    # Return user details (do NOT return session token in body)
     return {
         "user": {
             "id": user["id"],
@@ -191,11 +253,18 @@ async def user_sign_in(
             "first_name": user["first_name"],
             "last_name": user["last_name"],
             "bio": user["bio"],
-            "profile_picture": user["profile_picture"],  # return the directory instead?
+            "profile_picture": (
+                {
+                    "id": user["profile_picture"],
+                    "directory": user["profile_picture_directory"],
+                    "filename": user["profile_picture_filename"],
+                }
+                if user["profile_picture"]
+                else None
+            ),
             "uuid": account["uuid"],
         },
-        "session_token": session_details["session_token"],
-        "expires_at": session_details["expires_at"].isoformat(),
+        "expires_at": expires_at.isoformat(),
     }
 
 
@@ -204,6 +273,7 @@ async def organization_sign_in(
     email: EmailStr = Form(...),
     password: constr(min_length=8) = Form(...),
     request: Request = None,
+    response: Response = None,
 ):
     # Find account by email
     stmt = select(table["account"]).where(table["account"].c.email == email)
@@ -218,9 +288,25 @@ async def organization_sign_in(
     ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # Get organization details linked to account
-    org_stmt = select(table["organization"]).where(
-        table["organization"].c.account_id == account["id"]
+    # Get organization details linked to account, join resource for logo
+    org_stmt = (
+        select(
+            table["organization"].c.id,
+            table["organization"].c.account_id,
+            table["organization"].c.name,
+            table["organization"].c.logo,
+            table["organization"].c.category,
+            table["organization"].c.description,
+            table["resource"].c.directory.label("logo_directory"),
+            table["resource"].c.filename.label("logo_filename"),
+        )
+        .select_from(
+            table["organization"].outerjoin(
+                table["resource"],
+                table["organization"].c.logo == table["resource"].c.id,
+            )
+        )
+        .where(table["organization"].c.account_id == account["id"])
     )
     org_result = session.execute(org_stmt).first()
     if not org_result:
@@ -229,22 +315,60 @@ async def organization_sign_in(
         )
     organization = org_result._mapping
 
+    # Create session and set cookie
     session_details = add_session(
         account_uuid=account["uuid"],
         request=request,
     )
+    session_token = session_details["session_token"]
+    expires_at = session_details["expires_at"]
 
-    # Return user details and session token
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=True,  # Set to True in production
+        samesite="Lax",
+        path="/",
+        expires=expires_at,
+    )
+
+    # Return organization details (do NOT return session token in body)
     return {
         "organization": {
             "id": organization["id"],
             "account_id": organization["account_id"],
             "name": organization["name"],
-            "logo": organization["logo"],
+            "logo": (
+                {
+                    "id": organization["logo"],
+                    "directory": organization["logo_directory"],
+                    "filename": organization["logo_filename"],
+                }
+                if organization["logo"]
+                else None
+            ),
             "category": organization["category"],
             "description": organization["description"],
             "uuid": account["uuid"],
         },
-        "session_token": session_details["session_token"],
-        "expires_at": session_details["expires_at"].isoformat(),
+        "expires_at": expires_at.isoformat(),
     }
+
+
+@router.post("/logout", tags=["Logout"])
+async def logout(response: Response, session_token: str = Cookie(None)):
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+    try:
+        # Remove session from database
+        session_deleted = delete_session(session_token)
+        if session_deleted == 0:
+            raise HTTPException(status_code=404, detail="Session not found")
+        # Remove cookie from client
+        response.delete_cookie(key="session_token", path="/")
+        return {"message": "Successfully logged out"}
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

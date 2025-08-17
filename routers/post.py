@@ -16,6 +16,7 @@ from typing import Optional
 from utils.resource_utils import add_resource, delete_resource, get_resource
 from lib.models import PostModel
 from sqlalchemy import update, delete
+from fastapi import Cookie
 
 router = APIRouter(
     prefix="/post",
@@ -29,24 +30,38 @@ session = db.session
 
 @router.post("/", tags=["Create Post"])
 async def create_post(
-    account_uuid: str = Form(...),
-    account_id: int = Form(None),
     image: UploadFile = File(None),
     description: str = Form(None),
+    session_token: str = Cookie(None, alias="session_token"),
 ):
-    resource_id = add_resource(image, account_uuid)
-    if account_id is None:
+    try:
+        if not session_token:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        # Get account_uuid from session table using session_token
+        session_stmt = select(table["session"].c.account_uuid).where(
+            table["session"].c.session_token == session_token
+        )
+        session_row = session.execute(session_stmt).first()
+        if not session_row:
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
+        account_uuid = session_row._mapping["account_uuid"]
+
+        # Get account_id from account_uuid
         select_stmt = select(table["account"].c.id).where(
             table["account"].c.uuid == account_uuid
         )
         account_id = session.execute(select_stmt).scalar()
+        if account_id is None:
+            raise HTTPException(status_code=404, detail="Account not found")
 
-    stmt = insert(table["post"]).values(
-        author=account_id,
-        image=resource_id,
-        description=description,
-    )
-    try:
+        resource_id = add_resource(image, account_uuid) if image else None
+
+        stmt = insert(table["post"]).values(
+            author=account_id,
+            image=resource_id,
+            description=description,
+        )
         session.execute(stmt)
         session.commit()
         return {"message": "Post created successfully"}
@@ -67,6 +82,7 @@ async def get_all_posts(
 ):
     try:
         offset = (page - 1) * page_size
+        profile_resource = table["resource"].alias("profile_resource")
         post_stmt = (
             select(
                 table["post"].c.id,
@@ -82,6 +98,10 @@ async def get_all_posts(
                 table["user"].c.profile_picture.label("author_profile_picture"),
                 table["resource"].c.directory.label("image_directory"),
                 table["resource"].c.filename.label("image_filename"),
+                table["resource"].c.id.label("image_id"),
+                profile_resource.c.directory.label("author_profile_picture_directory"),
+                profile_resource.c.filename.label("author_profile_picture_filename"),
+                profile_resource.c.id.label("author_profile_picture_id"),
             )
             .select_from(
                 table["post"]
@@ -91,6 +111,10 @@ async def get_all_posts(
                 )
                 .outerjoin(
                     table["resource"], table["post"].c.image == table["resource"].c.id
+                )
+                .outerjoin(
+                    profile_resource,
+                    table["user"].c.profile_picture == profile_resource.c.id,
                 )
             )
             .order_by(table["post"].c.created_date.desc())
@@ -103,7 +127,8 @@ async def get_all_posts(
             data = row._mapping
             post_id = data["id"]
 
-            # Fetch top 3 latest comments for this post, joined with user details
+            # Fetch top 3 latest comments for this post, join user profile_picture to resource
+            comment_resource = table["resource"].alias("comment_resource")
             comment_stmt = (
                 select(
                     table["comment"].c.id.label("comment_id"),
@@ -116,6 +141,9 @@ async def get_all_posts(
                     table["user"].c.last_name,
                     table["user"].c.bio,
                     table["user"].c.profile_picture,
+                    comment_resource.c.directory.label("profile_picture_directory"),
+                    comment_resource.c.filename.label("profile_picture_filename"),
+                    comment_resource.c.id.label("profile_picture_id"),
                 )
                 .select_from(
                     table["comment"]
@@ -126,6 +154,10 @@ async def get_all_posts(
                     .outerjoin(
                         table["user"],
                         table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        comment_resource,
+                        table["user"].c.profile_picture == comment_resource.c.id,
                     )
                 )
                 .where(table["comment"].c.post_id == post_id)
@@ -150,7 +182,15 @@ async def get_all_posts(
                             "first_name": cdata["first_name"],
                             "last_name": cdata["last_name"],
                             "bio": cdata["bio"],
-                            "profile_picture": cdata["profile_picture"],
+                            "profile_picture": (
+                                {
+                                    "id": cdata["profile_picture_id"],
+                                    "directory": cdata["profile_picture_directory"],
+                                    "filename": cdata["profile_picture_filename"],
+                                }
+                                if cdata["profile_picture_id"]
+                                else None
+                            ),
                         },
                     }
                 )
@@ -164,14 +204,22 @@ async def get_all_posts(
                     "author_first_name": data["author_first_name"],
                     "author_last_name": data["author_last_name"],
                     "author_bio": data["author_bio"],
-                    "author_profile_picture": data["author_profile_picture"],
+                    "author_profile_picture": (
+                        {
+                            "id": data["author_profile_picture_id"],
+                            "directory": data["author_profile_picture_directory"],
+                            "filename": data["author_profile_picture_filename"],
+                        }
+                        if data["author_profile_picture_id"]
+                        else None
+                    ),
                     "image": (
                         {
-                            "id": data["image"],
+                            "id": data["image_id"],
                             "directory": data["image_directory"],
                             "filename": data["image_filename"],
                         }
-                        if data["image"]
+                        if data["image_id"]
                         else None
                     ),
                     "description": data["description"],
@@ -191,20 +239,47 @@ async def get_all_posts(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{account_uuid}", tags=["Get Posts"])
+@router.get("/{account_uuid}", tags=["Get Posts of User or Organization"])
 async def get_posts(
     account_uuid: str,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(5, ge=1, le=100, description="Posts per page"),
 ):
     try:
-        select_stmt = select(table["account"].c.id).where(
+        # Get account details
+        account_stmt = select(table["account"]).where(
             table["account"].c.uuid == account_uuid
         )
-        account_id = session.execute(select_stmt).scalar()
+        account_result = session.execute(account_stmt).first()
+        if not account_result:
+            raise HTTPException(status_code=404, detail="Account not found")
+        account = account_result._mapping
+        account_id = account["id"]
+        role_id = account["role_id"]
+
+        # Get role name
+        role_stmt = select(table["role"].c.name).where(table["role"].c.id == role_id)
+        role_result = session.execute(role_stmt).scalar()
+        is_user = role_result == "user"
+        is_org = role_result == "organization"
+
         offset = (page - 1) * page_size
         post_stmt = (
-            select(table["post"])
+            select(
+                table["post"].c.id,
+                table["post"].c.author,
+                table["post"].c.image,
+                table["post"].c.description,
+                table["post"].c.created_date,
+                table["post"].c.last_modified_date,
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+            )
+            .select_from(
+                table["post"].outerjoin(
+                    table["resource"], table["post"].c.image == table["resource"].c.id
+                )
+            )
             .where(table["post"].c.author == account_id)
             .order_by(table["post"].c.created_date.desc())
             .limit(page_size)
@@ -216,10 +291,110 @@ async def get_posts(
                 status_code=404, detail="No posts found for this account"
             )
 
-        posts = [dict(row._mapping) for row in result]
+        # Get author details based on role
+        author_details = None
+        if is_user:
+            user_stmt = (
+                select(
+                    table["user"].c.id,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                    table["user"].c.bio,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
+                )
+                .select_from(
+                    table["user"].outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
+                )
+                .where(table["user"].c.account_id == account_id)
+            )
+            user_result = session.execute(user_stmt).first()
+            if user_result:
+                user = user_result._mapping
+                author_details = {
+                    "type": "user",
+                    "id": user["id"],
+                    "first_name": user["first_name"],
+                    "last_name": user["last_name"],
+                    "bio": user["bio"],
+                    "profile_picture": (
+                        {
+                            "id": user["profile_picture"],
+                            "directory": user["profile_picture_directory"],
+                            "filename": user["profile_picture_filename"],
+                        }
+                        if user["profile_picture"]
+                        else None
+                    ),
+                }
+        elif is_org:
+            org_stmt = (
+                select(
+                    table["organization"].c.id,
+                    table["organization"].c.name,
+                    table["organization"].c.logo,
+                    table["organization"].c.category,
+                    table["organization"].c.description,
+                    table["resource"].c.directory.label("logo_directory"),
+                    table["resource"].c.filename.label("logo_filename"),
+                )
+                .select_from(
+                    table["organization"].outerjoin(
+                        table["resource"],
+                        table["organization"].c.logo == table["resource"].c.id,
+                    )
+                )
+                .where(table["organization"].c.account_id == account_id)
+            )
+            org_result = session.execute(org_stmt).first()
+            if org_result:
+                org = org_result._mapping
+                author_details = {
+                    "type": "organization",
+                    "id": org["id"],
+                    "name": org["name"],
+                    "category": org["category"],
+                    "description": org["description"],
+                    "logo": (
+                        {
+                            "id": org["logo"],
+                            "directory": org["logo_directory"],
+                            "filename": org["logo_filename"],
+                        }
+                        if org["logo"]
+                        else None
+                    ),
+                }
+
+        posts = []
+        for row in result:
+            data = row._mapping
+            posts.append(
+                {
+                    "id": data["id"],
+                    "author_id": data["author"],
+                    "image": (
+                        {
+                            "id": data["image"],
+                            "directory": data["image_directory"],
+                            "filename": data["image_filename"],
+                        }
+                        if data["image"]
+                        else None
+                    ),
+                    "description": data["description"],
+                    "created_date": data["created_date"],
+                    "last_modified_date": data["last_modified_date"],
+                }
+            )
         return {
             "page": page,
             "page_size": page_size,
+            "author": author_details,
             "posts": posts,
             "count": len(posts),
         }
@@ -248,7 +423,21 @@ async def get_posts_with_comments(
 
         # Fetch posts
         post_stmt = (
-            select(table["post"])
+            select(
+                table["post"].c.id,
+                table["post"].c.author,
+                table["post"].c.image,
+                table["post"].c.description,
+                table["post"].c.created_date,
+                table["post"].c.last_modified_date,
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+            )
+            .select_from(
+                table["post"].outerjoin(
+                    table["resource"], table["post"].c.image == table["resource"].c.id
+                )
+            )
             .where(table["post"].c.author == account_id)
             .order_by(table["post"].c.created_date.desc())
             .limit(page_size)
@@ -265,7 +454,7 @@ async def get_posts_with_comments(
             post_dict = dict(row._mapping)
             post_id = post_dict["id"]
 
-            # Fetch top 3 latest comments for this post, joined with user details
+            # Fetch top 3 latest comments for this post, joined with user details and profile picture resource
             comment_stmt = (
                 select(
                     table["comment"].c.id.label("comment_id"),
@@ -278,6 +467,8 @@ async def get_posts_with_comments(
                     table["user"].c.last_name,
                     table["user"].c.bio,
                     table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
                 )
                 .select_from(
                     table["comment"]
@@ -288,6 +479,10 @@ async def get_posts_with_comments(
                     .outerjoin(
                         table["user"],
                         table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
                     )
                 )
                 .where(table["comment"].c.post_id == post_id)
@@ -312,11 +507,29 @@ async def get_posts_with_comments(
                             "first_name": data["first_name"],
                             "last_name": data["last_name"],
                             "bio": data["bio"],
-                            "profile_picture": data["profile_picture"],
+                            "profile_picture": (
+                                {
+                                    "id": data["profile_picture"],
+                                    "directory": data["profile_picture_directory"],
+                                    "filename": data["profile_picture_filename"],
+                                }
+                                if data["profile_picture"]
+                                else None
+                            ),
                         },
                     }
                 )
             post_dict["comments"] = comments
+            # Add image resource details to post
+            post_dict["image"] = (
+                {
+                    "id": post_dict["image"],
+                    "directory": post_dict["image_directory"],
+                    "filename": post_dict["image_filename"],
+                }
+                if post_dict["image"]
+                else None
+            )
             posts.append(post_dict)
 
         return {
@@ -336,16 +549,37 @@ async def update_post(
     post_id: int = Path(..., description="The ID of the post to update"),
     description: str = Form(None),
     image: UploadFile = File(None),
-    account_uuid: str = Form(...),
+    session_token: str = Cookie(None, alias="session_token"),
 ):
     try:
-        # Get account_id from uuid
-        select_stmt = select(table["account"].c.id).where(
+        if not session_token:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        # Get account_uuid from session table using session_token
+        session_stmt = select(table["session"].c.account_uuid).where(
+            table["session"].c.session_token == session_token
+        )
+        session_row = session.execute(session_stmt).first()
+        if not session_row:
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
+        account_uuid = session_row._mapping["account_uuid"]
+
+        # Get account_id from account_uuid
+        account_stmt = select(table["account"].c.id).where(
             table["account"].c.uuid == account_uuid
         )
-        account_id = session.execute(select_stmt).scalar()
-        if account_id is None:
+        account_row = session.execute(account_stmt).first()
+        if not account_row:
             raise HTTPException(status_code=404, detail="Account not found")
+        account_id = account_row._mapping["id"]
+
+        # Check if post is owned by user
+        post_stmt = select(table["post"].c.author).where(table["post"].c.id == post_id)
+        post = session.execute(post_stmt).fetchone()
+        if not post or post.author != account_id:
+            raise HTTPException(
+                status_code=403, detail="You are not the author of this post"
+            )
 
         # Prepare update values
         update_values = {}
@@ -358,8 +592,7 @@ async def update_post(
         if not update_values:
             raise HTTPException(status_code=400, detail="No update fields provided")
 
-        # Update post only if author matches
-
+        # Update post
         stmt = (
             update(table["post"])
             .where(table["post"].c.id == post_id)
@@ -386,23 +619,37 @@ async def update_post(
 @router.delete("/{post_id}", tags=["Delete Post"])
 async def delete_post(
     post_id: int = Path(..., description="The ID of the post to delete"),
-    account_uuid: str = Form(...),
+    session_token: str = Cookie(None, alias="session_token"),
 ):
     try:
-        # Get account_id from uuid
-        select_stmt = select(table["account"].c.id).where(
+        if not session_token:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        # Get account_uuid from session table using session_token
+        session_stmt = select(table["session"].c.account_uuid).where(
+            table["session"].c.session_token == session_token
+        )
+
+        session_row = session.execute(session_stmt).first()
+        if not session_row:
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
+        account_uuid = session_row._mapping["account_uuid"]
+
+        # Get account_id from account_uuid
+        account_stmt = select(table["account"].c.id).where(
             table["account"].c.uuid == account_uuid
         )
-        account_id = session.execute(select_stmt).scalar()
+        account_id = session.execute(account_stmt).scalar()
+
         if account_id is None:
             raise HTTPException(status_code=404, detail="Account not found")
 
         # Check if post exists and is owned by user
-        post_stmt = select(table["post"].c.image).where(
-            table["post"].c.id == post_id, table["post"].c.author == account_id
+        post_stmt = select(table["post"].c.image, table["post"].c.author).where(
+            table["post"].c.id == post_id
         )
         post = session.execute(post_stmt).fetchone()
-        if not post:
+        if not post or post.author != account_id:
             raise HTTPException(
                 status_code=404, detail="Post not found or not owned by user"
             )

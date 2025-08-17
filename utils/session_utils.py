@@ -27,12 +27,12 @@ SESSION_DURATION_MINUTES = 60  # 1 hour session
 
 def add_session(account_uuid: str, request: Request):
     now = datetime.now(tz=timezone.utc)
-    expires_at = now + timedelta(minutes=SESSION_DURATION_MINUTES)
+    expires_at_date_time = now + timedelta(minutes=SESSION_DURATION_MINUTES)
     ip_address = request.client.host
     user_agent = request.headers.get("user-agent", "")
     payload = {
         "account_uuid": account_uuid,
-        "exp": expires_at,
+        "exp": expires_at_date_time,
         "iat": now,
     }
 
@@ -42,7 +42,7 @@ def add_session(account_uuid: str, request: Request):
         account_uuid=account_uuid,
         session_token=session_token,
         created_at=now,
-        expires_at=expires_at,
+        expires_at=expires_at_date_time,
         ip_address=ip_address,
         user_agent=user_agent,
         last_activity=now,
@@ -50,7 +50,7 @@ def add_session(account_uuid: str, request: Request):
     try:
         session.execute(stmt)
         session.commit()
-        return {"session_token": session_token, "expires_at": expires_at}
+        return {"session_token": session_token, "expires_at": expires_at_date_time}
     except IntegrityError:
         session.rollback()
         raise HTTPException(status_code=400, detail="Could not create session")
@@ -61,11 +61,10 @@ def add_session(account_uuid: str, request: Request):
         session.close()
 
 
-def delete_session(session_token: str, account_uuid: str):
+def delete_session(session_token: str):
     try:
         stmt = delete(table["session"]).where(
             table["session"].c.session_token == session_token
-            and table["session"].c.account_uuid == account_uuid
         )
         result = session.execute(stmt)
         session.commit()
