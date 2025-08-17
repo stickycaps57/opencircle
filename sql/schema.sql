@@ -137,7 +137,6 @@ CREATE TABLE `event` (
   `address_id` bigint(20) NOT NULL,
   `description` text NOT NULL,
   `image` bigint(20) DEFAULT NULL,
-  `is_autoaccept` tinyint(1) NOT NULL DEFAULT 1,
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
   `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
@@ -147,7 +146,7 @@ CREATE TABLE `event` (
   CONSTRAINT `event_address_FK` FOREIGN KEY (`address_id`) REFERENCES `address` (`id`),
   CONSTRAINT `event_organization_FK` FOREIGN KEY (`organization_id`) REFERENCES `organization` (`id`) ON DELETE CASCADE,
   CONSTRAINT `event_resource_FK` FOREIGN KEY (`image`) REFERENCES `resource` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 
 -- opencircle.membership definition

@@ -21,7 +21,12 @@ from utils.organization_utils import create_organization
 import jwt
 import os
 from datetime import datetime, timedelta, timezone
-from utils.session_utils import add_session, delete_session
+from utils.session_utils import (
+    add_session,
+    delete_session,
+    get_account_uuid_from_session,
+)
+
 
 router = APIRouter(
     prefix="/account",
@@ -32,6 +37,9 @@ db = Database()
 table = db.tables
 session = db.session
 engine = db.engine
+
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "fallback-unsafe-key")
+SESSION_DURATION_MINUTES = 600  # 10 hours
 
 
 @router.post("/user", tags=["Create User Account"])
@@ -146,16 +154,9 @@ async def delete_account_by_uuid(
 ):
     if not session_token:
         raise HTTPException(status_code=401, detail="Session token missing")
-    # Get session from database
-    stmt = select(table["session"]).where(
-        table["session"].c.session_token == session_token
-    )
-    session_result = session.execute(stmt).first()
-    if not session_result:
-        raise HTTPException(status_code=401, detail="Invalid or expired session")
-    session_data = session_result._mapping
-    # Check if session's account_uuid matches the account_uuid to delete
-    if session_data["account_uuid"] != account_uuid:
+    # Use utility function to get account_uuid from session
+    session_account_uuid = get_account_uuid_from_session(session_token)
+    if session_account_uuid != account_uuid:
         raise HTTPException(
             status_code=403, detail="You are not authorized to delete this account"
         )
@@ -176,10 +177,6 @@ async def delete_account_by_uuid(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
-
-
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "fallback-unsafe-key")
-SESSION_DURATION_MINUTES = 60  # 1 hour
 
 
 @router.post("/user_signin", tags=["User Sign In"])

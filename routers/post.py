@@ -17,6 +17,8 @@ from utils.resource_utils import add_resource, delete_resource, get_resource
 from lib.models import PostModel
 from sqlalchemy import update, delete
 from fastapi import Cookie
+from utils.session_utils import get_account_uuid_from_session
+
 
 router = APIRouter(
     prefix="/post",
@@ -38,14 +40,7 @@ async def create_post(
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
 
-        # Get account_uuid from session table using session_token
-        session_stmt = select(table["session"].c.account_uuid).where(
-            table["session"].c.session_token == session_token
-        )
-        session_row = session.execute(session_stmt).first()
-        if not session_row:
-            raise HTTPException(status_code=401, detail="Invalid or expired session")
-        account_uuid = session_row._mapping["account_uuid"]
+        account_uuid = get_account_uuid_from_session(session_token)
 
         # Get account_id from account_uuid
         select_stmt = select(table["account"].c.id).where(
@@ -555,14 +550,7 @@ async def update_post(
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
 
-        # Get account_uuid from session table using session_token
-        session_stmt = select(table["session"].c.account_uuid).where(
-            table["session"].c.session_token == session_token
-        )
-        session_row = session.execute(session_stmt).first()
-        if not session_row:
-            raise HTTPException(status_code=401, detail="Invalid or expired session")
-        account_uuid = session_row._mapping["account_uuid"]
+        account_uuid = get_account_uuid_from_session(session_token)
 
         # Get account_id from account_uuid
         account_stmt = select(table["account"].c.id).where(
@@ -625,15 +613,7 @@ async def delete_post(
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
 
-        # Get account_uuid from session table using session_token
-        session_stmt = select(table["session"].c.account_uuid).where(
-            table["session"].c.session_token == session_token
-        )
-
-        session_row = session.execute(session_stmt).first()
-        if not session_row:
-            raise HTTPException(status_code=401, detail="Invalid or expired session")
-        account_uuid = session_row._mapping["account_uuid"]
+        account_uuid = get_account_uuid_from_session(session_token)
 
         # Get account_id from account_uuid
         account_stmt = select(table["account"].c.id).where(

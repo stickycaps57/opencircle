@@ -7,6 +7,7 @@ from fastapi import (
     Form,
     Request,
     Query,
+    Cookie,
 )
 from pydantic import BaseModel, constr
 from lib.database import Database
@@ -18,6 +19,7 @@ from lib.models import EventModel
 from sqlalchemy import update, delete
 from utils.address_utils import add_address, update_address
 from utils.resource_utils import add_resource
+from utils.session_utils import get_account_uuid_from_session
 
 
 router = APIRouter(
@@ -32,7 +34,6 @@ session = db.session
 
 @router.post("/", tags=["Create Event"])
 async def create_event(
-    account_uuid: str = Form(...),
     title: str = Form(...),
     event_date: str = Form(...),
     country: str = Form(...),
@@ -41,10 +42,15 @@ async def create_event(
     barangay: str = Form(...),
     house_building_number: str = Form(...),
     description: str = Form(...),
-    is_autoaccept: bool = Form(...),
     image: Optional[UploadFile] = File(None),
+    session_token: str = Cookie(None, alias="session_token"),
 ):
     try:
+        if not session_token:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        account_uuid = get_account_uuid_from_session(session_token)
+
         # Fetch organization id using account_uuid
         select_organization = (
             select(table["organization"].c.id)
@@ -82,7 +88,6 @@ async def create_event(
             address_id=address_id,
             description=description,
             image=image_id,
-            is_autoaccept=is_autoaccept,
         )
         result = session.execute(stmt)
         session.commit()
@@ -101,16 +106,41 @@ async def create_event(
 
 @router.delete("/{event_id}", tags=["Delete Event"])
 async def delete_event(
-    event_id: int = Path(..., description="ID of the event to delete")
+    event_id: int = Path(..., description="ID of the event to delete"),
+    session_token: str = Cookie(None, alias="session_token"),
 ):
     try:
-        # Check if event exists
+        if not session_token:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        account_uuid = get_account_uuid_from_session(session_token)
+
+        # Get organization id using account_uuid
+        select_organization = (
+            select(table["organization"].c.id)
+            .select_from(
+                table["organization"].join(
+                    table["account"],
+                    table["organization"].c.account_id == table["account"].c.id,
+                )
+            )
+            .where(table["account"].c.uuid == account_uuid)
+        )
+        organization_id = session.execute(select_organization).scalar()
+        if organization_id is None:
+            raise HTTPException(status_code=404, detail="Organization not found")
+
+        # Check if event exists and is owned by this organization
         select_event = select(table["event"].c.id).where(
-            table["event"].c.id == event_id
+            (table["event"].c.id == event_id)
+            & (table["event"].c.organization_id == organization_id)
         )
         event_exists = session.execute(select_event).scalar()
         if not event_exists:
-            raise HTTPException(status_code=404, detail="Event not found")
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to delete this event or event not found",
+            )
 
         # Delete the event
         stmt = delete(table["event"]).where(table["event"].c.id == event_id)
@@ -125,7 +155,7 @@ async def delete_event(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/", tags=["Get Events"])
+@router.get("/", tags=["Get all Events and Show RSVP Status of User Per Event"])
 async def get_events(
     account_uuid: str = Query(..., description="Account UUID to check RSVP status")
 ):
@@ -138,21 +168,99 @@ async def get_events(
         if account_id is None:
             raise HTTPException(status_code=404, detail="Account not found")
 
-        # Get all events
-        select_events = select(table["event"]).order_by(
-            table["event"].c.event_date.desc()
+        # Get all events, join image to resource, address to address, and organization to organization_id
+        select_events = (
+            select(
+                table["event"].c.id,
+                table["event"].c.organization_id,
+                table["event"].c.title,
+                table["event"].c.event_date,
+                table["event"].c.address_id,
+                table["event"].c.description,
+                table["event"].c.image,
+                table["event"].c.created_date,
+                table["event"].c.last_modified_date,
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
+                table["organization"].c.name.label("organization_name"),
+                table["organization"].c.description.label("organization_description"),
+                table["organization"].c.logo.label("organization_logo"),
+                table["organization"].c.category.label("organization_category"),
+            )
+            .select_from(
+                table["event"]
+                .outerjoin(
+                    table["resource"], table["event"].c.image == table["resource"].c.id
+                )
+                .outerjoin(
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
+                )
+                .outerjoin(
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
+                )
+            )
+            .order_by(table["event"].c.event_date.desc())
         )
         events_result = session.execute(select_events).fetchall()
-        events = [dict(row._mapping) for row in events_result]
+        events = []
+        for row in events_result:
+            event = dict(row._mapping)
+            event["image"] = (
+                {
+                    "id": event["image"],
+                    "directory": event["image_directory"],
+                    "filename": event["image_filename"],
+                }
+                if event["image"]
+                else None
+            )
+            event.pop("image_directory", None)
+            event.pop("image_filename", None)
 
-        # Get RSVP status for each event for this account
-        for event in events:
+            event["address"] = {
+                "id": event["address_id"],
+                "country": event["address_country"],
+                "province": event["address_province"],
+                "city": event["address_city"],
+                "barangay": event["address_barangay"],
+                "house_building_number": event["address_house_building_number"],
+            }
+            event.pop("address_country", None)
+            event.pop("address_province", None)
+            event.pop("address_city", None)
+            event.pop("address_barangay", None)
+            event.pop("address_house_building_number", None)
+
+            event["organization"] = {
+                "id": event["organization_id"],
+                "name": event["organization_name"],
+                "description": event["organization_description"],
+                "logo": event["organization_logo"],
+                "category": event["organization_category"],
+            }
+            event.pop("organization_name", None)
+            event.pop("organization_description", None)
+            event.pop("organization_logo", None)
+            event.pop("organization_category", None)
+
+            # Get RSVP status for each event for this account
             select_rsvp = select(table["rsvp"].c.status).where(
                 (table["rsvp"].c.event_id == event["id"])
                 & (table["rsvp"].c.attendee == account_id)
             )
             rsvp_result = session.execute(select_rsvp).scalar()
             event["rsvp_status"] = rsvp_result if rsvp_result else "none"
+
+            events.append(event)
 
         return {"events": events}
     except SQLAlchemyError as e:
@@ -164,7 +272,6 @@ async def get_events(
 @router.put("/{event_id}", tags=["Update Event"])
 async def update_event(
     event_id: int = Path(..., description="ID of the event to update"),
-    account_uuid: str = Form(...),
     title: Optional[str] = Form(None),
     event_date: Optional[str] = Form(None),
     country: Optional[str] = Form(None),
@@ -173,19 +280,31 @@ async def update_event(
     barangay: Optional[str] = Form(None),
     house_building_number: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
-    is_autoaccept: Optional[bool] = Form(None),
     image: Optional[UploadFile] = File(None),
+    session_token: str = Cookie(None, alias="session_token"),
 ):
     try:
-        # Get account_id from account_uuid
-        select_account = select(table["account"].c.id).where(
-            table["account"].c.uuid == account_uuid
-        )
-        account_id = session.execute(select_account).scalar()
-        if account_id is None:
-            raise HTTPException(status_code=404, detail="Account not found")
+        if not session_token:
+            raise HTTPException(status_code=401, detail="Authentication required")
 
-        # Check if event exists and is owned by this account
+        account_uuid = get_account_uuid_from_session(session_token)
+
+        # Get organization id using account_uuid
+        select_organization = (
+            select(table["organization"].c.id)
+            .select_from(
+                table["organization"].join(
+                    table["account"],
+                    table["organization"].c.account_id == table["account"].c.id,
+                )
+            )
+            .where(table["account"].c.uuid == account_uuid)
+        )
+        organization_id = session.execute(select_organization).scalar()
+        if organization_id is None:
+            raise HTTPException(status_code=404, detail="Organization not found")
+
+        # Check if event exists and is owned by this organization
         select_event = (
             select(table["event"], table["organization"])
             .select_from(
@@ -195,7 +314,7 @@ async def update_event(
                 )
             )
             .where(table["event"].c.id == event_id)
-            .where(table["organization"].c.account_id == account_id)
+            .where(table["organization"].c.id == organization_id)
         )
         event = session.execute(select_event).fetchone()
         if not event:
@@ -212,8 +331,6 @@ async def update_event(
             update_data["event_date"] = event_date
         if description is not None:
             update_data["description"] = description
-        if is_autoaccept is not None:
-            update_data["is_autoaccept"] = is_autoaccept
 
         # Update address if any address field is provided
         address_fields = [country, province, city, barangay, house_building_number]
@@ -230,7 +347,7 @@ async def update_event(
 
         # Update image if provided
         if image:
-            image_id = add_resource(image, account_id)
+            image_id = add_resource(image, organization_id)
             update_data["image"] = image_id
 
         if not update_data:
@@ -279,6 +396,8 @@ async def get_event_rsvps(
                 table["user"].c.last_name,
                 table["user"].c.bio,
                 table["user"].c.profile_picture,
+                table["resource"].c.directory.label("profile_picture_directory"),
+                table["resource"].c.filename.label("profile_picture_filename"),
             )
             .select_from(
                 table["rsvp"]
@@ -288,11 +407,29 @@ async def get_event_rsvps(
                 .outerjoin(
                     table["user"], table["user"].c.account_id == table["account"].c.id
                 )
+                .outerjoin(
+                    table["resource"],
+                    table["user"].c.profile_picture == table["resource"].c.id,
+                )
             )
             .where(table["rsvp"].c.event_id == event_id)
         )
         rsvps_result = session.execute(stmt).fetchall()
-        rsvps = [dict(row._mapping) for row in rsvps_result]
+        rsvps = []
+        for row in rsvps_result:
+            rsvp = dict(row._mapping)
+            # Group profile_picture details if present
+            if rsvp["profile_picture"]:
+                rsvp["profile_picture"] = {
+                    "id": rsvp["profile_picture"],
+                    "directory": rsvp["profile_picture_directory"],
+                    "filename": rsvp["profile_picture_filename"],
+                }
+            else:
+                rsvp["profile_picture"] = None
+            rsvp.pop("profile_picture_directory", None)
+            rsvp.pop("profile_picture_filename", None)
+            rsvps.append(rsvp)
 
         return {"event_id": event_id, "rsvps": rsvps}
     except SQLAlchemyError as e:
@@ -321,40 +458,41 @@ async def get_active_events_by_organizer(
         if organization_id is None:
             raise HTTPException(status_code=404, detail="Organization not found")
 
-        # Get all active events for this organization (with joined RSVPs)
+        # Get all active events for this organization (with joined RSVPs, address, resource)
         select_events = (
             select(
-                table["event"],
-                table["rsvp"].c.id.label("rsvp_id"),
-                table["rsvp"].c.status.label("rsvp_status"),
-                table["account"].c.id.label("account_id"),
-                table["account"].c.uuid,
-                table["account"].c.email,
-                table["user"].c.first_name,
-                table["user"].c.last_name,
-                table["user"].c.bio,
-                table["user"].c.profile_picture,
+                table["event"].c.id,
+                table["event"].c.organization_id,
+                table["event"].c.title,
+                table["event"].c.event_date,
+                table["event"].c.address_id,
+                table["event"].c.description,
+                table["event"].c.image,
+                table["event"].c.created_date,
+                table["event"].c.last_modified_date,
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
             )
             .select_from(
                 table["event"]
                 .outerjoin(
-                    table["rsvp"],
-                    (table["event"].c.id == table["rsvp"].c.event_id)
-                    & (table["rsvp"].c.status == "joined"),
+                    table["resource"], table["event"].c.image == table["resource"].c.id
                 )
                 .outerjoin(
-                    table["account"],
-                    table["rsvp"].c.attendee == table["account"].c.id,
-                )
-                .outerjoin(
-                    table["user"],
-                    table["user"].c.account_id == table["account"].c.id,
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
                 )
             )
             .where(
                 (table["event"].c.organization_id == organization_id)
                 & (table["event"].c.event_date >= func.current_date())
-                & (table["event"].c.status == "active")
             )
             .order_by(table["event"].c.event_date.asc())
         )
@@ -364,49 +502,102 @@ async def get_active_events_by_organizer(
         events_dict = {}
         for row in events_result:
             event_id = row._mapping["id"]
-            if event_id not in events_dict:
-                # Copy event columns except member info
-                event_data = {
-                    k: v
-                    for k, v in row._mapping.items()
-                    if k
-                    not in [
-                        "rsvp_id",
-                        "rsvp_status",
-                        "account_id",
-                        "uuid",
-                        "email",
-                        "first_name",
-                        "last_name",
-                        "bio",
-                        "profile_picture",
-                    ]
+            event_data = dict(row._mapping)
+            # Group image details
+            event_data["image"] = (
+                {
+                    "id": event_data["image"],
+                    "directory": event_data["image_directory"],
+                    "filename": event_data["image_filename"],
                 }
-                event_data["members"] = []
-                event_data["pending_rsvps"] = []
-                events_dict[event_id] = event_data
+                if event_data["image"]
+                else None
+            )
+            event_data.pop("image_directory", None)
+            event_data.pop("image_filename", None)
+            # Group address details (including house_building_number inside address)
+            event_data["address"] = {
+                "id": event_data["address_id"],
+                "country": event_data["address_country"],
+                "province": event_data["address_province"],
+                "city": event_data["address_city"],
+                "barangay": event_data["address_barangay"],
+                "house_building_number": event_data["address_house_building_number"],
+            }
+            event_data.pop("address_country", None)
+            event_data.pop("address_province", None)
+            event_data.pop("address_city", None)
+            event_data.pop("address_barangay", None)
+            event_data.pop("address_house_building_number", None)
+            event_data["members"] = []
+            event_data["pending_rsvps"] = []
+            events_dict[event_id] = event_data
 
-            # Add member info if RSVP exists and is joined
-            if row._mapping["rsvp_id"]:
-                member = {
-                    "rsvp_id": row._mapping["rsvp_id"],
-                    "rsvp_status": row._mapping["rsvp_status"],
-                    "account": {
-                        "id": row._mapping["account_id"],
-                        "uuid": row._mapping["uuid"],
-                        "email": row._mapping["email"],
-                    },
-                    "user": {
-                        "first_name": row._mapping["first_name"],
-                        "last_name": row._mapping["last_name"],
-                        "bio": row._mapping["bio"],
-                        "profile_picture": row._mapping["profile_picture"],
-                    },
-                }
-                events_dict[event_id]["members"].append(member)
-
-        # Fetch pending RSVPs for each event and add to pending_rsvps
+        # Fetch joined RSVPs for each event and add to members
         for event_id in events_dict.keys():
+            joined_stmt = (
+                select(
+                    table["rsvp"].c.id.label("rsvp_id"),
+                    table["rsvp"].c.status.label("rsvp_status"),
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                    table["user"].c.bio,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
+                )
+                .select_from(
+                    table["rsvp"]
+                    .join(
+                        table["account"],
+                        table["rsvp"].c.attendee == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
+                )
+                .where(
+                    (table["rsvp"].c.event_id == event_id)
+                    & (table["rsvp"].c.status == "joined")
+                )
+            )
+            joined_result = session.execute(joined_stmt).fetchall()
+            members = []
+            for row in joined_result:
+                profile_picture = None
+                if row._mapping["profile_picture"]:
+                    profile_picture = {
+                        "id": row._mapping["profile_picture"],
+                        "directory": row._mapping["profile_picture_directory"],
+                        "filename": row._mapping["profile_picture_filename"],
+                    }
+                members.append(
+                    {
+                        "rsvp_id": row._mapping["rsvp_id"],
+                        "rsvp_status": row._mapping["rsvp_status"],
+                        "account": {
+                            "id": row._mapping["account_id"],
+                            "uuid": row._mapping["uuid"],
+                            "email": row._mapping["email"],
+                        },
+                        "user": {
+                            "first_name": row._mapping["first_name"],
+                            "last_name": row._mapping["last_name"],
+                            "bio": row._mapping["bio"],
+                            "profile_picture": profile_picture,
+                        },
+                    }
+                )
+            events_dict[event_id]["members"] = members
+
             # Pending RSVPs
             pending_stmt = (
                 select(
@@ -419,6 +610,8 @@ async def get_active_events_by_organizer(
                     table["user"].c.last_name,
                     table["user"].c.bio,
                     table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
                 )
                 .select_from(
                     table["rsvp"]
@@ -430,6 +623,10 @@ async def get_active_events_by_organizer(
                         table["user"],
                         table["user"].c.account_id == table["account"].c.id,
                     )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
                 )
                 .where(
                     (table["rsvp"].c.event_id == event_id)
@@ -439,6 +636,13 @@ async def get_active_events_by_organizer(
             pending_result = session.execute(pending_stmt).fetchall()
             pending_rsvps = []
             for row in pending_result:
+                profile_picture = None
+                if row._mapping["profile_picture"]:
+                    profile_picture = {
+                        "id": row._mapping["profile_picture"],
+                        "directory": row._mapping["profile_picture_directory"],
+                        "filename": row._mapping["profile_picture_filename"],
+                    }
                 pending_rsvps.append(
                     {
                         "rsvp_id": row._mapping["rsvp_id"],
@@ -452,7 +656,7 @@ async def get_active_events_by_organizer(
                             "first_name": row._mapping["first_name"],
                             "last_name": row._mapping["last_name"],
                             "bio": row._mapping["bio"],
-                            "profile_picture": row._mapping["profile_picture"],
+                            "profile_picture": profile_picture,
                         },
                     }
                 )
@@ -469,6 +673,9 @@ async def get_active_events_by_organizer(
                     table["account"].c.email,
                     table["user"].c.first_name,
                     table["user"].c.last_name,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
                 )
                 .select_from(
                     table["comment"]
@@ -480,6 +687,10 @@ async def get_active_events_by_organizer(
                         table["user"],
                         table["user"].c.account_id == table["account"].c.id,
                     )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
                 )
                 .where(table["comment"].c.event_id == event_id)
                 .order_by(table["comment"].c.created_date.desc())
@@ -488,6 +699,16 @@ async def get_active_events_by_organizer(
             comments_result = session.execute(comments_stmt).fetchall()
             limited_comments = []
             for row in comments_result:
+                profile_picture = None
+                if (
+                    "profile_picture" in row._mapping
+                    and row._mapping["profile_picture"]
+                ):
+                    profile_picture = {
+                        "id": row._mapping["profile_picture"],
+                        "directory": row._mapping.get("profile_picture_directory"),
+                        "filename": row._mapping.get("profile_picture_filename"),
+                    }
                 limited_comments.append(
                     {
                         "comment_id": row._mapping["comment_id"],
@@ -501,6 +722,7 @@ async def get_active_events_by_organizer(
                         "user": {
                             "first_name": row._mapping["first_name"],
                             "last_name": row._mapping["last_name"],
+                            "profile_picture": profile_picture,
                         },
                     }
                 )
@@ -533,40 +755,41 @@ async def get_past_events_by_organizer(
         if organization_id is None:
             raise HTTPException(status_code=404, detail="Organization not found")
 
-        # Get all past events for this organization (with joined RSVPs)
+        # Get all past events for this organization (with joined RSVPs, address, resource)
         select_events = (
             select(
-                table["event"],
-                table["rsvp"].c.id.label("rsvp_id"),
-                table["rsvp"].c.status.label("rsvp_status"),
-                table["account"].c.id.label("account_id"),
-                table["account"].c.uuid,
-                table["account"].c.email,
-                table["user"].c.first_name,
-                table["user"].c.last_name,
-                table["user"].c.bio,
-                table["user"].c.profile_picture,
+                table["event"].c.id,
+                table["event"].c.organization_id,
+                table["event"].c.title,
+                table["event"].c.event_date,
+                table["event"].c.address_id,
+                table["event"].c.description,
+                table["event"].c.image,
+                table["event"].c.created_date,
+                table["event"].c.last_modified_date,
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
             )
             .select_from(
                 table["event"]
                 .outerjoin(
-                    table["rsvp"],
-                    (table["event"].c.id == table["rsvp"].c.event_id)
-                    & (table["rsvp"].c.status == "joined"),
+                    table["resource"], table["event"].c.image == table["resource"].c.id
                 )
                 .outerjoin(
-                    table["account"],
-                    table["rsvp"].c.attendee == table["account"].c.id,
-                )
-                .outerjoin(
-                    table["user"],
-                    table["user"].c.account_id == table["account"].c.id,
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
                 )
             )
             .where(
                 (table["event"].c.organization_id == organization_id)
                 & (table["event"].c.event_date < func.current_date())
-                & (table["event"].c.status == "active")
             )
             .order_by(table["event"].c.event_date.desc())
         )
@@ -576,48 +799,167 @@ async def get_past_events_by_organizer(
         events_dict = {}
         for row in events_result:
             event_id = row._mapping["id"]
-            if event_id not in events_dict:
-                # Copy event columns except member info
-                event_data = {
-                    k: v
-                    for k, v in row._mapping.items()
-                    if k
-                    not in [
-                        "rsvp_id",
-                        "rsvp_status",
-                        "account_id",
-                        "uuid",
-                        "email",
-                        "first_name",
-                        "last_name",
-                        "bio",
-                        "profile_picture",
-                    ]
+            event_data = dict(row._mapping)
+            # Group image details
+            event_data["image"] = (
+                {
+                    "id": event_data["image"],
+                    "directory": event_data["image_directory"],
+                    "filename": event_data["image_filename"],
                 }
-                event_data["members"] = []
-                events_dict[event_id] = event_data
+                if event_data["image"]
+                else None
+            )
+            event_data.pop("image_directory", None)
+            event_data.pop("image_filename", None)
+            # Group address details (including house_building_number inside address)
+            event_data["address"] = {
+                "id": event_data["address_id"],
+                "country": event_data["address_country"],
+                "province": event_data["address_province"],
+                "city": event_data["address_city"],
+                "barangay": event_data["address_barangay"],
+                "house_building_number": event_data["address_house_building_number"],
+            }
+            event_data.pop("address_country", None)
+            event_data.pop("address_province", None)
+            event_data.pop("address_city", None)
+            event_data.pop("address_barangay", None)
+            event_data.pop("address_house_building_number", None)
+            event_data["members"] = []
+            event_data["pending_rsvps"] = []
+            events_dict[event_id] = event_data
 
-            # Add member info if RSVP exists and is joined
-            if row._mapping["rsvp_id"]:
-                member = {
-                    "rsvp_id": row._mapping["rsvp_id"],
-                    "rsvp_status": row._mapping["rsvp_status"],
-                    "account": {
-                        "id": row._mapping["account_id"],
-                        "uuid": row._mapping["uuid"],
-                        "email": row._mapping["email"],
-                    },
-                    "user": {
-                        "first_name": row._mapping["first_name"],
-                        "last_name": row._mapping["last_name"],
-                        "bio": row._mapping["bio"],
-                        "profile_picture": row._mapping["profile_picture"],
-                    },
-                }
-                events_dict[event_id]["members"].append(member)
-
-        # Limited comments: top 2 latest for each event
+        # Fetch joined RSVPs for each event and add to members
         for event_id in events_dict.keys():
+            joined_stmt = (
+                select(
+                    table["rsvp"].c.id.label("rsvp_id"),
+                    table["rsvp"].c.status.label("rsvp_status"),
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                    table["user"].c.bio,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
+                )
+                .select_from(
+                    table["rsvp"]
+                    .join(
+                        table["account"],
+                        table["rsvp"].c.attendee == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
+                )
+                .where(
+                    (table["rsvp"].c.event_id == event_id)
+                    & (table["rsvp"].c.status == "joined")
+                )
+            )
+            joined_result = session.execute(joined_stmt).fetchall()
+            members = []
+            for row in joined_result:
+                profile_picture = None
+                if row._mapping["profile_picture"]:
+                    profile_picture = {
+                        "id": row._mapping["profile_picture"],
+                        "directory": row._mapping["profile_picture_directory"],
+                        "filename": row._mapping["profile_picture_filename"],
+                    }
+                members.append(
+                    {
+                        "rsvp_id": row._mapping["rsvp_id"],
+                        "rsvp_status": row._mapping["rsvp_status"],
+                        "account": {
+                            "id": row._mapping["account_id"],
+                            "uuid": row._mapping["uuid"],
+                            "email": row._mapping["email"],
+                        },
+                        "user": {
+                            "first_name": row._mapping["first_name"],
+                            "last_name": row._mapping["last_name"],
+                            "bio": row._mapping["bio"],
+                            "profile_picture": profile_picture,
+                        },
+                    }
+                )
+            events_dict[event_id]["members"] = members
+
+            # Pending RSVPs
+            pending_stmt = (
+                select(
+                    table["rsvp"].c.id.label("rsvp_id"),
+                    table["rsvp"].c.status.label("rsvp_status"),
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                    table["user"].c.bio,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
+                )
+                .select_from(
+                    table["rsvp"]
+                    .join(
+                        table["account"],
+                        table["rsvp"].c.attendee == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
+                )
+                .where(
+                    (table["rsvp"].c.event_id == event_id)
+                    & (table["rsvp"].c.status == "pending")
+                )
+            )
+            pending_result = session.execute(pending_stmt).fetchall()
+            pending_rsvps = []
+            for row in pending_result:
+                profile_picture = None
+                if row._mapping["profile_picture"]:
+                    profile_picture = {
+                        "id": row._mapping["profile_picture"],
+                        "directory": row._mapping["profile_picture_directory"],
+                        "filename": row._mapping["profile_picture_filename"],
+                    }
+                pending_rsvps.append(
+                    {
+                        "rsvp_id": row._mapping["rsvp_id"],
+                        "rsvp_status": row._mapping["rsvp_status"],
+                        "account": {
+                            "id": row._mapping["account_id"],
+                            "uuid": row._mapping["uuid"],
+                            "email": row._mapping["email"],
+                        },
+                        "user": {
+                            "first_name": row._mapping["first_name"],
+                            "last_name": row._mapping["last_name"],
+                            "bio": row._mapping["bio"],
+                            "profile_picture": profile_picture,
+                        },
+                    }
+                )
+            events_dict[event_id]["pending_rsvps"] = pending_rsvps
+
+            # Limited comments: top 2 latest for this event
             comments_stmt = (
                 select(
                     table["comment"].c.id.label("comment_id"),
@@ -628,6 +970,9 @@ async def get_past_events_by_organizer(
                     table["account"].c.email,
                     table["user"].c.first_name,
                     table["user"].c.last_name,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
                 )
                 .select_from(
                     table["comment"]
@@ -639,6 +984,10 @@ async def get_past_events_by_organizer(
                         table["user"],
                         table["user"].c.account_id == table["account"].c.id,
                     )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
                 )
                 .where(table["comment"].c.event_id == event_id)
                 .order_by(table["comment"].c.created_date.desc())
@@ -647,6 +996,16 @@ async def get_past_events_by_organizer(
             comments_result = session.execute(comments_stmt).fetchall()
             limited_comments = []
             for row in comments_result:
+                profile_picture = None
+                if (
+                    "profile_picture" in row._mapping
+                    and row._mapping["profile_picture"]
+                ):
+                    profile_picture = {
+                        "id": row._mapping["profile_picture"],
+                        "directory": row._mapping.get("profile_picture_directory"),
+                        "filename": row._mapping.get("profile_picture_filename"),
+                    }
                 limited_comments.append(
                     {
                         "comment_id": row._mapping["comment_id"],
@@ -660,6 +1019,7 @@ async def get_past_events_by_organizer(
                         "user": {
                             "first_name": row._mapping["first_name"],
                             "last_name": row._mapping["last_name"],
+                            "profile_picture": profile_picture,
                         },
                     }
                 )
@@ -703,55 +1063,130 @@ async def get_events_by_month_year(
 
         # Past events: before today
         past_stmt = (
-            select(table["event"])
+            select(
+                table["event"],
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+            )
+            .select_from(
+                table["event"]
+                .outerjoin(
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
+                )
+                .outerjoin(
+                    table["resource"], table["event"].c.image == table["resource"].c.id
+                )
+            )
             .where(
                 (table["event"].c.organization_id == organization_id)
                 & (table["event"].c.event_date < func.current_date())
-                & (table["event"].c.status == "active")
                 & month_year_filter(table["event"].c.event_date)[0]
                 & month_year_filter(table["event"].c.event_date)[1]
             )
             .order_by(table["event"].c.event_date.desc())
         )
-        past_events = [
-            dict(row._mapping) for row in session.execute(past_stmt).fetchall()
-        ]
-
-        # Upcoming events: after today
-        upcoming_stmt = (
-            select(table["event"])
-            .where(
-                (table["event"].c.organization_id == organization_id)
-                & (table["event"].c.event_date > func.current_date())
-                & (table["event"].c.status == "active")
-                & month_year_filter(table["event"].c.event_date)[0]
-                & month_year_filter(table["event"].c.event_date)[1]
+        past_events_result = session.execute(past_stmt).fetchall()
+        past_events = []
+        for row in past_events_result:
+            event = dict(row._mapping)
+            event["image"] = (
+                {
+                    "id": event["image"],
+                    "directory": event["image_directory"],
+                    "filename": event["image_filename"],
+                }
+                if event["image"]
+                else None
             )
-            .order_by(table["event"].c.event_date.asc())
-        )
-        upcoming_events = [
-            dict(row._mapping) for row in session.execute(upcoming_stmt).fetchall()
-        ]
+            event.pop("image_directory", None)
+            event.pop("image_filename", None)
+            event["address"] = {
+                "id": event["address_id"],
+                "country": event["address_country"],
+                "province": event["address_province"],
+                "city": event["address_city"],
+                "barangay": event["address_barangay"],
+                "house_building_number": event["address_house_building_number"],
+            }
+            event.pop("address_country", None)
+            event.pop("address_province", None)
+            event.pop("address_city", None)
+            event.pop("address_barangay", None)
+            event.pop("address_house_building_number", None)
+            past_events.append(event)
 
         # Active events: today or future, status active
         active_stmt = (
-            select(table["event"])
+            select(
+                table["event"],
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+            )
+            .select_from(
+                table["event"]
+                .outerjoin(
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
+                )
+                .outerjoin(
+                    table["resource"], table["event"].c.image == table["resource"].c.id
+                )
+            )
             .where(
                 (table["event"].c.organization_id == organization_id)
                 & (table["event"].c.event_date >= func.current_date())
-                & (table["event"].c.status == "active")
                 & month_year_filter(table["event"].c.event_date)[0]
                 & month_year_filter(table["event"].c.event_date)[1]
             )
             .order_by(table["event"].c.event_date.asc())
         )
-        active_events = [
-            dict(row._mapping) for row in session.execute(active_stmt).fetchall()
-        ]
+        active_events_result = session.execute(active_stmt).fetchall()
+        active_events = []
+        for row in active_events_result:
+            event = dict(row._mapping)
+            event["image"] = (
+                {
+                    "id": event["image"],
+                    "directory": event["image_directory"],
+                    "filename": event["image_filename"],
+                }
+                if event["image"]
+                else None
+            )
+            event.pop("image_directory", None)
+            event.pop("image_filename", None)
+            event["address"] = {
+                "id": event["address_id"],
+                "country": event["address_country"],
+                "province": event["address_province"],
+                "city": event["address_city"],
+                "barangay": event["address_barangay"],
+                "house_building_number": event["address_house_building_number"],
+            }
+            event.pop("address_country", None)
+            event.pop("address_province", None)
+            event.pop("address_city", None)
+            event.pop("address_barangay", None)
+            event.pop("address_house_building_number", None)
+            active_events.append(event)
 
         return {
             "past_events": past_events,
-            "upcoming_events": upcoming_events,
             "active_events": active_events,
         }
     except SQLAlchemyError as e:

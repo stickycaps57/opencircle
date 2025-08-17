@@ -91,3 +91,24 @@ def update_session_last_activity(session_token: str):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+
+def get_account_uuid_from_session(session_token: str) -> str:
+    """
+    Returns the account_uuid associated with the given session_token.
+    Raises HTTPException if session is missing or invalid.
+    """
+    try:
+        now = datetime.now(tz=timezone.utc)
+        stmt = select(table["session"].c.account_uuid).where(
+            table["session"].c.session_token == session_token,
+            table["session"].c.expires_at > now,
+        )
+        session_row = session.execute(stmt).first()
+        if not session_row:
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
+        return session_row._mapping["account_uuid"]
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
