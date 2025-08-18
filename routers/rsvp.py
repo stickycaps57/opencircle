@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException, Form
 from lib.database import Database
 from sqlalchemy import insert, update, delete
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from fastapi import Request
+from utils.session_utils import get_account_uuid_from_session
+
 
 router = APIRouter(
     prefix="/rsvp",
@@ -16,20 +19,26 @@ session = db.session
 @router.post("/", tags=["Create RSVP"])
 async def create_rsvp(
     event_id: int = Form(...),
-    account_uuid: str = Form(...),
+    request: Request = None,
 ):
+    # Get session_token from cookie
+    session_token = request.cookies.get("session_token")
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+
+    # Use utility function to get account_uuid from session
+    account_uuid = get_account_uuid_from_session(session_token)
 
     event = session.query(table["event"]).filter_by(id=event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    if getattr(event, "auto_accept", 0) == 1:
-        status = "joined"
-    else:
-        status = "pending"
+    status = "pending"
+
     account = session.query(table["account"]).filter_by(uuid=account_uuid).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     account_id = account.id
+
     stmt = insert(table["rsvp"]).values(
         event_id=event_id, attendee=account_id, status=status
     )
@@ -55,22 +64,66 @@ async def get_rsvps_for_event(
     event_id: int,
 ):
     try:
-        # Fetch all RSVP records for the given event_id
-        rsvp_stmt = session.query(table["rsvp"]).filter_by(event_id=event_id).all()
+        # Fetch all RSVP records for the given event_id, joining account, user, and resource tables
+        rsvp_stmt = (
+            session.query(
+                table["rsvp"].c.id.label("rsvp_id"),
+                table["rsvp"].c.event_id,
+                table["rsvp"].c.attendee,
+                table["rsvp"].c.status,
+                table["rsvp"].c.created_date,
+                table["rsvp"].c.last_modified_date,
+                table["account"].c.uuid.label("account_uuid"),
+                table["account"].c.email,
+                table["user"].c.id.label("user_id"),
+                table["user"].c.first_name,
+                table["user"].c.last_name,
+                table["user"].c.bio,
+                table["resource"].c.directory.label("profile_picture_directory"),
+                table["resource"].c.filename.label("profile_picture_filename"),
+                table["resource"].c.id.label("profile_picture_id"),
+            )
+            .join(table["account"], table["rsvp"].c.attendee == table["account"].c.id)
+            .outerjoin(
+                table["user"], table["user"].c.account_id == table["account"].c.id
+            )
+            .outerjoin(
+                table["resource"],
+                table["user"].c.profile_picture == table["resource"].c.id,
+            )
+            .filter(table["rsvp"].c.event_id == event_id)
+            .all()
+        )
         if not rsvp_stmt:
             raise HTTPException(status_code=404, detail="No RSVPs found for this event")
 
         # Convert results to list of dicts
         rsvps = []
-        for rsvp in rsvp_stmt:
+        for row in rsvp_stmt:
+            data = row._mapping
             rsvps.append(
                 {
-                    "id": rsvp.id,
-                    "event_id": rsvp.event_id,
-                    "attendee": rsvp.attendee,
-                    "status": rsvp.status,
-                    "created_date": rsvp.created_date,
-                    "last_modified_date": rsvp.last_modified_date,
+                    "id": data["rsvp_id"],
+                    "event_id": data["event_id"],
+                    "attendee": data["attendee"],
+                    "status": data["status"],
+                    "created_date": data["created_date"],
+                    "last_modified_date": data["last_modified_date"],
+                    "account_uuid": data["account_uuid"],
+                    "user_id": data["user_id"],
+                    "first_name": data["first_name"],
+                    "last_name": data["last_name"],
+                    "email": data["email"],
+                    "bio": data["bio"],
+                    "profile_picture": (
+                        {
+                            "id": data["profile_picture_id"],
+                            "directory": data["profile_picture_directory"],
+                            "filename": data["profile_picture_filename"],
+                        }
+                        if data["profile_picture_id"]
+                        else None
+                    ),
                 }
             )
         return {"event_id": event_id, "rsvps": rsvps}
@@ -89,9 +142,25 @@ async def get_attendees_for_event(
     try:
         # Fetch all RSVP records for the given event_id
         rsvp_stmt = (
-            session.query(table["rsvp"], table["account"], table["user"])
+            session.query(
+                table["account"].c.uuid,
+                table["user"].c.id,
+                table["user"].c.first_name,
+                table["user"].c.last_name,
+                table["account"].c.email,
+                table["resource"].c.directory.label("profile_picture_directory"),
+                table["resource"].c.filename.label("profile_picture_filename"),
+                table["resource"].c.id.label("profile_picture_id"),
+            )
+            .select_from(table["rsvp"])
             .join(table["account"], table["rsvp"].c.attendee == table["account"].c.id)
-            .join(table["user"], table["account"].c.id == table["user"].c.account_id)
+            .outerjoin(
+                table["user"], table["account"].c.id == table["user"].c.account_id
+            )
+            .outerjoin(
+                table["resource"],
+                table["user"].c.profile_picture == table["resource"].c.id,
+            )
             .filter(
                 table["rsvp"].c.event_id == event_id, table["rsvp"].c.status == "joined"
             )
@@ -108,11 +177,20 @@ async def get_attendees_for_event(
             data = row._mapping
             rsvps.append(
                 {
-                    "account_uuid": data[table["account"].c.uuid],
-                    "user_id": data[table["user"].c.id],
-                    "first_name": data[table["user"].c.first_name],
-                    "last_name": data[table["user"].c.last_name],
-                    "email": data[table["account"].c.email],
+                    "account_uuid": data["uuid"],
+                    "user_id": data["id"],
+                    "first_name": data["first_name"],
+                    "last_name": data["last_name"],
+                    "email": data["email"],
+                    "profile_picture": (
+                        {
+                            "id": data["profile_picture_id"],
+                            "directory": data["profile_picture_directory"],
+                            "filename": data["profile_picture_filename"],
+                        }
+                        if data["profile_picture_id"]
+                        else None
+                    ),
                 }
             )
         return {"event_id": event_id, "attendees": rsvps}
@@ -127,36 +205,51 @@ async def get_attendees_for_event(
 @router.put("/status/{rsvp_id}", tags=["Update RSVP Status"])
 async def update_rsvp_status(
     rsvp_id: int,
-    account_uuid: str = Form(...),
+    request: Request = None,
     status: str = Form(...),
 ):
-    # Get account_id from uuid
-    account = session.query(table["account"]).filter_by(uuid=account_uuid).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    account_id = account.id
-
-    # Only allow update if the account is the Organization who owns the event
-    # and the account is linked to the organization_id under the Event table
-    event = (
-        session.query(table["event"])
-        .join(table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id)
-        .filter(table["rsvp"].c.id == rsvp_id)
-        .first()
-    )
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found for RSVP")
-    # Check if account is linked to the event's organization
-    org = session.query(table["organization"]).filter_by(account_id=account_id).first()
-
-    if not org or getattr(org, "id", None) != getattr(event, "organization_id", None):
-        raise HTTPException(
-            status_code=403, detail="Account not linked to event's organization"
-        )
-    stmt = (
-        update(table["rsvp"]).where(table["rsvp"].c.id == rsvp_id).values(status=status)
-    )
     try:
+        # Get session_token from cookie
+        session_token = request.cookies.get("session_token")
+        if not session_token:
+            raise HTTPException(status_code=401, detail="Session token missing")
+
+        # Use utility function to get account_uuid from session
+        account_uuid = get_account_uuid_from_session(session_token)
+
+        # Get account_id from uuid
+        account = session.query(table["account"]).filter_by(uuid=account_uuid).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        account_id = account.id
+
+        # Get RSVP and related event
+        rsvp = session.query(table["rsvp"]).filter_by(id=rsvp_id).first()
+        if not rsvp:
+            raise HTTPException(status_code=404, detail="RSVP not found")
+        event = session.query(table["event"]).filter_by(id=rsvp.event_id).first()
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found for RSVP")
+
+        # Only allow update if the account is the Organization who owns the event
+        org = (
+            session.query(table["organization"])
+            .filter_by(account_id=account_id)
+            .first()
+        )
+        if not org or getattr(org, "id", None) != getattr(
+            event, "organization_id", None
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the event organizer can update RSVP status",
+            )
+
+        stmt = (
+            update(table["rsvp"])
+            .where(table["rsvp"].c.id == rsvp_id)
+            .values(status=status)
+        )
         result = session.execute(stmt)
         session.commit()
         if result.rowcount == 0:
@@ -178,9 +271,17 @@ async def update_rsvp_status(
 @router.delete("/{rsvp_id}", tags=["Delete RSVP"])
 async def delete_rsvp(
     rsvp_id: int,
-    account_uuid: str = Form(...),
+    request: Request = None,
 ):
     try:
+        # Get session_token from cookie
+        session_token = request.cookies.get("session_token")
+        if not session_token:
+            raise HTTPException(status_code=401, detail="Session token missing")
+
+        # Use utility function to get account_uuid from session
+        account_uuid = get_account_uuid_from_session(session_token)
+
         # Get RSVP and related event
         rsvp = session.query(table["rsvp"]).filter_by(id=rsvp_id).first()
         if not rsvp:
