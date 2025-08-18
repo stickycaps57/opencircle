@@ -1296,8 +1296,8 @@ async def get_events_by_status_with_comments(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/random_with_comments", tags=["Get Random Events With Comments"])
-async def get_random_events_with_comments(
+@router.get("/all_with_comments", tags=["Get All Events With Comments"])
+async def get_all_events_with_comments(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(5, ge=1, le=20, description="Events per page (max 20)"),
 ):
@@ -1308,39 +1308,105 @@ async def get_random_events_with_comments(
         count_stmt = select(func.count()).select_from(table["event"])
         total_events = session.execute(count_stmt).scalar()
 
-        # Select random events and join organization table
-        random_events_stmt = (
+        # Create an alias for the resource table for organization logo
+        logo_resource = table["resource"].alias("logo_resource")
+
+        # Select events ordered by created_date and join organization, resource (image), address, and logo_resource tables
+        events_stmt = (
             select(
                 table["event"],
                 table["organization"].c.id.label("org_id"),
                 table["organization"].c.name.label("org_name"),
                 table["organization"].c.description.label("org_description"),
                 table["organization"].c.logo.label("org_logo"),
+                logo_resource.c.directory.label("logo_directory"),
+                logo_resource.c.filename.label("logo_filename"),
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
             )
             .select_from(
-                table["event"].join(
+                table["event"]
+                .join(
                     table["organization"],
                     table["event"].c.organization_id == table["organization"].c.id,
                 )
+                .outerjoin(
+                    table["resource"],
+                    table["event"].c.image == table["resource"].c.id,
+                )
+                .outerjoin(
+                    logo_resource,
+                    table["organization"].c.logo == logo_resource.c.id,
+                )
+                .outerjoin(
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
+                )
             )
-            .order_by(func.rand())
+            .order_by(table["event"].c.created_date.desc())
             .limit(limit)
             .offset(offset)
         )
-        events_result = session.execute(random_events_stmt).fetchall()
+        events_result = session.execute(events_stmt).fetchall()
         events = []
         for row in events_result:
             event_data = dict(row._mapping)
-            # Group organization details
+            # Group organization details, including logo resource info
             event_data["organization"] = {
                 "id": event_data.pop("org_id"),
                 "name": event_data.pop("org_name"),
                 "description": event_data.pop("org_description"),
-                "logo": event_data.pop("org_logo"),
+                "logo": (
+                    {
+                        "id": event_data.get("org_logo"),
+                        "directory": event_data.get("logo_directory"),
+                        "filename": event_data.get("logo_filename"),
+                    }
+                    if event_data.get("org_logo")
+                    else None
+                ),
             }
+            event_data.pop("org_logo", None)
+            event_data.pop("logo_directory", None)
+            event_data.pop("logo_filename", None)
+            # Group image details
+            event_data["image"] = (
+                {
+                    "id": event_data.get("image"),
+                    "directory": event_data.get("image_directory"),
+                    "filename": event_data.get("image_filename"),
+                }
+                if event_data.get("image")
+                else None
+            )
+            event_data.pop("image_directory", None)
+            event_data.pop("image_filename", None)
+            # Group address details
+            event_data["address"] = {
+                "id": event_data.get("address_id"),
+                "country": event_data.get("address_country"),
+                "province": event_data.get("address_province"),
+                "city": event_data.get("address_city"),
+                "barangay": event_data.get("address_barangay"),
+                "house_building_number": event_data.get(
+                    "address_house_building_number"
+                ),
+            }
+            event_data.pop("address_country", None)
+            event_data.pop("address_province", None)
+            event_data.pop("address_city", None)
+            event_data.pop("address_barangay", None)
+            event_data.pop("address_house_building_number", None)
             events.append(event_data)
 
-        # For each event, get top 3 latest comments
+        # For each event, get top 3 latest comments (including profile_picture joined with resource)
         for event in events:
             event_id = event["id"]
             comments_stmt = (
@@ -1353,6 +1419,9 @@ async def get_random_events_with_comments(
                     table["account"].c.email,
                     table["user"].c.first_name,
                     table["user"].c.last_name,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
                 )
                 .select_from(
                     table["comment"]
@@ -1364,6 +1433,10 @@ async def get_random_events_with_comments(
                         table["user"],
                         table["user"].c.account_id == table["account"].c.id,
                     )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
                 )
                 .where(table["comment"].c.event_id == event_id)
                 .order_by(table["comment"].c.created_date.desc())
@@ -1372,6 +1445,13 @@ async def get_random_events_with_comments(
             comments_result = session.execute(comments_stmt).fetchall()
             latest_comments = []
             for row in comments_result:
+                profile_picture = None
+                if row._mapping.get("profile_picture"):
+                    profile_picture = {
+                        "id": row._mapping["profile_picture"],
+                        "directory": row._mapping.get("profile_picture_directory"),
+                        "filename": row._mapping.get("profile_picture_filename"),
+                    }
                 latest_comments.append(
                     {
                         "comment_id": row._mapping["comment_id"],
@@ -1385,6 +1465,7 @@ async def get_random_events_with_comments(
                         "user": {
                             "first_name": row._mapping["first_name"],
                             "last_name": row._mapping["last_name"],
+                            "profile_picture": profile_picture,
                         },
                     }
                 )
@@ -1427,12 +1508,56 @@ async def get_user_rsvped_events_by_month_year(
                 func.extract("year", col) == year,
             )
 
-        # Fetch events where user has RSVP
+        # Fetch events where user has RSVP, join address, organization, and resource tables
+        # Create an alias for the resource table for organization logo
+        logo_resource = table["resource"].alias("logo_resource")
         stmt = (
-            select(table["event"], table["rsvp"].c.status.label("rsvp_status"))
+            select(
+                table["event"].c.id.label("event_id"),
+                table["event"].c.organization_id.label("event_organization_id"),
+                table["event"].c.title,
+                table["event"].c.event_date,
+                table["event"].c.address_id,
+                table["event"].c.description,
+                table["event"].c.image,
+                table["event"].c.created_date,
+                table["event"].c.last_modified_date,
+                table["rsvp"].c.status.label("rsvp_status"),
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
+                table["organization"].c.id.label("organization_id"),
+                table["organization"].c.name.label("organization_name"),
+                table["organization"].c.description.label("organization_description"),
+                table["organization"].c.logo.label("organization_logo"),
+                table["organization"].c.category.label("organization_category"),
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+                logo_resource.c.directory.label("logo_directory"),
+                logo_resource.c.filename.label("logo_filename"),
+            )
             .select_from(
-                table["event"].join(
-                    table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id
+                table["event"]
+                .join(table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id)
+                .outerjoin(
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
+                )
+                .outerjoin(
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
+                )
+                .outerjoin(
+                    table["resource"],
+                    table["event"].c.image == table["resource"].c.id,
+                )
+                .outerjoin(
+                    logo_resource,
+                    table["organization"].c.logo == logo_resource.c.id,
                 )
             )
             .where(
@@ -1446,6 +1571,51 @@ async def get_user_rsvped_events_by_month_year(
         events = []
         for row in events_result:
             event_data = dict(row._mapping)
+            event_data["address"] = {
+                "id": event_data["address_id"],
+                "country": event_data["address_country"],
+                "province": event_data["address_province"],
+                "city": event_data["address_city"],
+                "barangay": event_data["address_barangay"],
+                "house_building_number": event_data["address_house_building_number"],
+            }
+            event_data.pop("address_country", None)
+            event_data.pop("address_province", None)
+            event_data.pop("address_city", None)
+            event_data.pop("address_barangay", None)
+            event_data.pop("address_house_building_number", None)
+
+            event_data["organization"] = {
+                "id": event_data.pop("organization_id"),
+                "name": event_data.pop("organization_name"),
+                "description": event_data.pop("organization_description"),
+                "logo": (
+                    {
+                        "id": event_data["organization_logo"],
+                        "directory": event_data.get("logo_directory"),
+                        "filename": event_data.get("logo_filename"),
+                    }
+                    if event_data.get("organization_logo")
+                    else None
+                ),
+                "category": event_data.pop("organization_category"),
+            }
+            event_data.pop("organization_logo", None)
+            event_data.pop("logo_directory", None)
+            event_data.pop("logo_filename", None)
+
+            event_data["image"] = (
+                {
+                    "id": event_data["image"],
+                    "directory": event_data.get("image_directory"),
+                    "filename": event_data.get("image_filename"),
+                }
+                if event_data.get("image")
+                else None
+            )
+            event_data.pop("image_directory", None)
+            event_data.pop("image_filename", None)
+
             events.append(event_data)
 
         return {"rsvped_events": events}
@@ -1472,6 +1642,9 @@ async def get_user_events_with_comments(
         if account_id is None:
             raise HTTPException(status_code=404, detail="Account not found")
 
+        # Create an alias for the resource table for organization logo
+        logo_resource = table["resource"].alias("logo_resource")
+
         # Get total count for pagination
         count_stmt = (
             select(func.count())
@@ -1484,12 +1657,44 @@ async def get_user_events_with_comments(
         )
         total_events = session.execute(count_stmt).scalar()
 
-        # Fetch paginated events linked to user (via RSVP)
+        # Fetch paginated events linked to user (via RSVP), join address, resource, organization, logo_resource
         events_stmt = (
-            select(table["event"])
+            select(
+                table["event"],
+                table["rsvp"].c.status.label("rsvp_status"),
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+                table["organization"].c.id.label("org_id"),
+                table["organization"].c.name.label("organization_name"),
+                table["organization"].c.description.label("organization_description"),
+                table["organization"].c.logo.label("organization_logo"),
+                table["organization"].c.category.label("organization_category"),
+                logo_resource.c.directory.label("logo_directory"),
+                logo_resource.c.filename.label("logo_filename"),
+            )
             .select_from(
-                table["event"].join(
-                    table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id
+                table["event"]
+                .join(table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id)
+                .outerjoin(
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
+                )
+                .outerjoin(
+                    table["resource"], table["event"].c.image == table["resource"].c.id
+                )
+                .outerjoin(
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
+                )
+                .outerjoin(
+                    logo_resource, table["organization"].c.logo == logo_resource.c.id
                 )
             )
             .where(table["rsvp"].c.attendee == account_id)
@@ -1498,10 +1703,58 @@ async def get_user_events_with_comments(
             .offset(offset)
         )
         events_result = session.execute(events_stmt).fetchall()
-        events = [dict(row._mapping) for row in events_result]
+        events = []
+        for row in events_result:
+            event = dict(row._mapping)
+            event["address"] = {
+                "id": event.get("address_id"),
+                "country": event.get("address_country"),
+                "province": event.get("address_province"),
+                "city": event.get("address_city"),
+                "barangay": event.get("address_barangay"),
+                "house_building_number": event.get("address_house_building_number"),
+            }
+            event.pop("address_country", None)
+            event.pop("address_province", None)
+            event.pop("address_city", None)
+            event.pop("address_barangay", None)
+            event.pop("address_house_building_number", None)
 
-        # For each event, fetch latest 3 comments
-        for event in events:
+            event["image"] = (
+                {
+                    "id": event.get("image"),
+                    "directory": event.get("image_directory"),
+                    "filename": event.get("image_filename"),
+                }
+                if event.get("image")
+                else None
+            )
+            event.pop("image_directory", None)
+            event.pop("image_filename", None)
+
+            event["organization"] = {
+                "id": event.pop("org_id"),
+                "name": event.pop("organization_name"),
+                "description": event.pop("organization_description"),
+                "logo": (
+                    {
+                        "id": event.get("organization_logo"),
+                        "directory": event.get("logo_directory"),
+                        "filename": event.get("logo_filename"),
+                    }
+                    if event.get("organization_logo")
+                    else None
+                ),
+                "category": event.pop("organization_category"),
+            }
+            event.pop("organization_logo", None)
+            event.pop("logo_directory", None)
+            event.pop("logo_filename", None)
+
+            # Attach RSVP status to the event
+            event["rsvp_status"] = event.get("rsvp_status", "none")
+
+            # For each event, fetch latest 3 comments (with user profile_picture joined to resource)
             event_id = event["id"]
             comments_stmt = (
                 select(
@@ -1513,6 +1766,9 @@ async def get_user_events_with_comments(
                     table["account"].c.email,
                     table["user"].c.first_name,
                     table["user"].c.last_name,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
                 )
                 .select_from(
                     table["comment"]
@@ -1524,6 +1780,10 @@ async def get_user_events_with_comments(
                         table["user"],
                         table["user"].c.account_id == table["account"].c.id,
                     )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
                 )
                 .where(table["comment"].c.event_id == event_id)
                 .order_by(table["comment"].c.created_date.desc())
@@ -1532,6 +1792,13 @@ async def get_user_events_with_comments(
             comments_result = session.execute(comments_stmt).fetchall()
             latest_comments = []
             for row in comments_result:
+                profile_picture = None
+                if row._mapping.get("profile_picture"):
+                    profile_picture = {
+                        "id": row._mapping["profile_picture"],
+                        "directory": row._mapping.get("profile_picture_directory"),
+                        "filename": row._mapping.get("profile_picture_filename"),
+                    }
                 latest_comments.append(
                     {
                         "comment_id": row._mapping["comment_id"],
@@ -1545,10 +1812,13 @@ async def get_user_events_with_comments(
                         "user": {
                             "first_name": row._mapping["first_name"],
                             "last_name": row._mapping["last_name"],
+                            "profile_picture": profile_picture,
                         },
                     }
                 )
             event["latest_comments"] = latest_comments
+
+            events.append(event)
 
         return {
             "events": events,
@@ -1588,6 +1858,9 @@ async def get_user_events_by_rsvp_status_with_comments(
         if account_id is None:
             raise HTTPException(status_code=404, detail="Account not found")
 
+        # Create an alias for the resource table for organization logo
+        logo_resource = table["resource"].alias("logo_resource")
+
         # Get total count for pagination
         count_stmt = (
             select(func.count())
@@ -1599,24 +1872,54 @@ async def get_user_events_by_rsvp_status_with_comments(
             .where(
                 (table["rsvp"].c.attendee == account_id)
                 & (table["rsvp"].c.status == rsvp_status)
-                & (table["event"].c.status == "active")
                 & (table["event"].c.event_date >= func.current_date())
             )
         )
         total_events = session.execute(count_stmt).scalar()
 
-        # Fetch paginated events where RSVP matches status and event is active
+        # Fetch paginated events with joins
         events_stmt = (
-            select(table["event"])
+            select(
+                table["event"],
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+                table["organization"].c.id.label("org_id"),
+                table["organization"].c.name.label("organization_name"),
+                table["organization"].c.description.label("organization_description"),
+                table["organization"].c.logo.label("organization_logo"),
+                table["organization"].c.category.label("organization_category"),
+                logo_resource.c.directory.label("logo_directory"),
+                logo_resource.c.filename.label("logo_filename"),
+            )
             .select_from(
-                table["event"].join(
-                    table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id
+                table["event"]
+                .join(table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id)
+                .outerjoin(
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
+                )
+                .outerjoin(
+                    table["resource"], table["event"].c.image == table["resource"].c.id
+                )
+                .outerjoin(
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
+                )
+                .outerjoin(
+                    logo_resource,
+                    table["organization"].c.logo == logo_resource.c.id,
                 )
             )
             .where(
                 (table["rsvp"].c.attendee == account_id)
                 & (table["rsvp"].c.status == rsvp_status)
-                & (table["event"].c.status == "active")
                 & (table["event"].c.event_date >= func.current_date())
             )
             .order_by(table["event"].c.event_date.asc())
@@ -1624,10 +1927,55 @@ async def get_user_events_by_rsvp_status_with_comments(
             .offset(offset)
         )
         events_result = session.execute(events_stmt).fetchall()
-        events = [dict(row._mapping) for row in events_result]
+        events = []
+        for row in events_result:
+            event = dict(row._mapping)
+            event["address"] = {
+                "id": event.get("address_id"),
+                "country": event.get("address_country"),
+                "province": event.get("address_province"),
+                "city": event.get("address_city"),
+                "barangay": event.get("address_barangay"),
+                "house_building_number": event.get("address_house_building_number"),
+            }
+            event.pop("address_country", None)
+            event.pop("address_province", None)
+            event.pop("address_city", None)
+            event.pop("address_barangay", None)
+            event.pop("address_house_building_number", None)
 
-        # For each event, fetch latest 3 comments
-        for event in events:
+            event["image"] = (
+                {
+                    "id": event.get("image"),
+                    "directory": event.get("image_directory"),
+                    "filename": event.get("image_filename"),
+                }
+                if event.get("image")
+                else None
+            )
+            event.pop("image_directory", None)
+            event.pop("image_filename", None)
+
+            event["organization"] = {
+                "id": event.pop("org_id"),
+                "name": event.pop("organization_name"),
+                "description": event.pop("organization_description"),
+                "logo": (
+                    {
+                        "id": event.get("organization_logo"),
+                        "directory": event.get("logo_directory"),
+                        "filename": event.get("logo_filename"),
+                    }
+                    if event.get("organization_logo")
+                    else None
+                ),
+                "category": event.pop("organization_category"),
+            }
+            event.pop("organization_logo", None)
+            event.pop("logo_directory", None)
+            event.pop("logo_filename", None)
+
+            # For each event, fetch latest 3 comments (with user profile_picture joined to resource)
             event_id = event["id"]
             comments_stmt = (
                 select(
@@ -1639,6 +1987,9 @@ async def get_user_events_by_rsvp_status_with_comments(
                     table["account"].c.email,
                     table["user"].c.first_name,
                     table["user"].c.last_name,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
                 )
                 .select_from(
                     table["comment"]
@@ -1650,6 +2001,10 @@ async def get_user_events_by_rsvp_status_with_comments(
                         table["user"],
                         table["user"].c.account_id == table["account"].c.id,
                     )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
                 )
                 .where(table["comment"].c.event_id == event_id)
                 .order_by(table["comment"].c.created_date.desc())
@@ -1658,6 +2013,13 @@ async def get_user_events_by_rsvp_status_with_comments(
             comments_result = session.execute(comments_stmt).fetchall()
             latest_comments = []
             for row in comments_result:
+                profile_picture = None
+                if row._mapping.get("profile_picture"):
+                    profile_picture = {
+                        "id": row._mapping["profile_picture"],
+                        "directory": row._mapping.get("profile_picture_directory"),
+                        "filename": row._mapping.get("profile_picture_filename"),
+                    }
                 latest_comments.append(
                     {
                         "comment_id": row._mapping["comment_id"],
@@ -1671,10 +2033,13 @@ async def get_user_events_by_rsvp_status_with_comments(
                         "user": {
                             "first_name": row._mapping["first_name"],
                             "last_name": row._mapping["last_name"],
+                            "profile_picture": profile_picture,
                         },
                     }
                 )
             event["latest_comments"] = latest_comments
+
+            events.append(event)
 
         return {
             "events": events,
