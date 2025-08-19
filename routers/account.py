@@ -260,6 +260,7 @@ async def user_sign_in(
                 else None
             ),
             "uuid": account["uuid"],
+            "role_id": account["role_id"],  # Include role_id from account table
         },
         "expires_at": expires_at.isoformat(),
     }
@@ -348,6 +349,7 @@ async def organization_sign_in(
             "category": organization["category"],
             "description": organization["description"],
             "uuid": account["uuid"],
+            "role_id": account["role_id"],  # Include role_id from account table
         },
         "expires_at": expires_at.isoformat(),
     }
