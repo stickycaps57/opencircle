@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # from .dependencies import get_query_token, get_token_header
 # from .internal import admin
@@ -24,6 +25,8 @@ app.include_router(event.router)
 app.include_router(rsvp.router)
 app.include_router(comment.router)
 app.include_router(organization.router)
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Configure CORS
 origins = [
