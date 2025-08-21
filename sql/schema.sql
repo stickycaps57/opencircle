@@ -170,3 +170,9 @@ CREATE TABLE `comment` (
   CONSTRAINT `comments_event_FK` FOREIGN KEY (`event_id`) REFERENCES `event` (`id`) ON DELETE CASCADE,
   CONSTRAINT `comments_post_FK` FOREIGN KEY (`post_id`) REFERENCES `post` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+
+insert
+	into
+	role (name)
+values ('user'),
+('organization');
