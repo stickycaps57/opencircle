@@ -32,6 +32,21 @@ table = db.tables
 session = db.session
 
 
+def address_dict(row):
+    return {
+        "id": row.get("address_id"),
+        "country": row.get("address_country"),
+        "province": row.get("address_province"),
+        "city": row.get("address_city"),
+        "barangay": row.get("address_barangay"),
+        "house_building_number": row.get("address_house_building_number"),
+        "country_code": row.get("address_country_code"),
+        "province_code": row.get("address_province_code"),
+        "city_code": row.get("address_city_code"),
+        "barangay_code": row.get("address_barangay_code"),
+    }
+
+
 @router.post("/", tags=["Create Event"])
 async def create_event(
     title: str = Form(...),
@@ -189,6 +204,10 @@ async def get_events(
                 table["address"].c.house_building_number.label(
                     "address_house_building_number"
                 ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
                 table["organization"].c.name.label("organization_name"),
                 table["organization"].c.description.label("organization_description"),
                 table["organization"].c.logo.label("organization_logo"),
@@ -226,19 +245,17 @@ async def get_events(
             event.pop("image_directory", None)
             event.pop("image_filename", None)
 
-            event["address"] = {
-                "id": event["address_id"],
-                "country": event["address_country"],
-                "province": event["address_province"],
-                "city": event["address_city"],
-                "barangay": event["address_barangay"],
-                "house_building_number": event["address_house_building_number"],
-            }
+            # Use the new address_dict function to expose all address fields
+            event["address"] = address_dict(event)
             event.pop("address_country", None)
             event.pop("address_province", None)
             event.pop("address_city", None)
             event.pop("address_barangay", None)
             event.pop("address_house_building_number", None)
+            event.pop("address_country_code", None)
+            event.pop("address_province_code", None)
+            event.pop("address_city_code", None)
+            event.pop("address_barangay_code", None)
 
             event["organization"] = {
                 "id": event["organization_id"],
