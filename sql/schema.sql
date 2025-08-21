@@ -7,10 +7,14 @@ CREATE TABLE `address` (
   `city` varchar(255) NOT NULL,
   `barangay` varchar(255) NOT NULL,
   `house_building_number` varchar(255) NOT NULL,
+  `country_code` varchar(100) NOT NULL,
+  `province_code` varchar(100) NOT NULL,
+  `city_code` varchar(100) NOT NULL,
+  `barangay_code` varchar(100) NOT NULL,
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
   `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 
 -- opencircle.resource definition
