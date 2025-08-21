@@ -207,6 +207,7 @@ async def user_sign_in(
             table["user"].c.first_name,
             table["user"].c.last_name,
             table["user"].c.bio,
+            table["account"].c.email,
             table["user"].c.profile_picture,
             table["resource"].c.directory.label("profile_picture_directory"),
             table["resource"].c.filename.label("profile_picture_filename"),
@@ -232,12 +233,22 @@ async def user_sign_in(
     session_token = session_details["session_token"]
     expires_at = session_details["expires_at"]
 
+    # response.set_cookie(
+    #     key="session_token",
+    #     value=session_token,
+    #     httponly=True,
+    #     secure=True,  # Set to True in production
+    #     samesite="Lax",
+    #     path="/",
+    #     expires=expires_at,
+    # )
+
     response.set_cookie(
         key="session_token",
         value=session_token,
         httponly=True,
-        secure=True,  # Set to True in production
-        samesite="Lax",
+        secure=False,  # False for local HTTP development
+        samesite="Lax",  # None for cross-origin cookies
         path="/",
         expires=expires_at,
     )
@@ -250,6 +261,7 @@ async def user_sign_in(
             "first_name": user["first_name"],
             "last_name": user["last_name"],
             "bio": user["bio"],
+            "email": account["email"],
             "profile_picture": (
                 {
                     "id": user["profile_picture"],
@@ -295,6 +307,7 @@ async def organization_sign_in(
             table["organization"].c.logo,
             table["organization"].c.category,
             table["organization"].c.description,
+            table["account"].c.email,
             table["resource"].c.directory.label("logo_directory"),
             table["resource"].c.filename.label("logo_filename"),
         )
@@ -321,12 +334,22 @@ async def organization_sign_in(
     session_token = session_details["session_token"]
     expires_at = session_details["expires_at"]
 
+    # response.set_cookie(
+    #     key="session_token",
+    #     value=session_token,
+    #     httponly=True,
+    #     secure=True,  # Set to True in production
+    #     samesite="Lax",
+    #     path="/",
+    #     expires=expires_at,
+    # )
+
     response.set_cookie(
         key="session_token",
         value=session_token,
         httponly=True,
-        secure=True,  # Set to True in production
-        samesite="Lax",
+        secure=False,  # False for local HTTP development
+        samesite="Lax",  # None for cross-origin cookies
         path="/",
         expires=expires_at,
     )
@@ -337,6 +360,7 @@ async def organization_sign_in(
             "id": organization["id"],
             "account_id": organization["account_id"],
             "name": organization["name"],
+            "email": account["email"],
             "logo": (
                 {
                     "id": organization["logo"],
