@@ -416,7 +416,10 @@ async def get_posts_with_comments(
 
         offset = (page - 1) * page_size
 
-        # Fetch posts
+        # Alias for profile picture resource
+        profile_resource = table["resource"].alias("profile_resource")
+
+        # Fetch posts with resource details, join author to account and user, join user.profile_picture to resource
         post_stmt = (
             select(
                 table["post"].c.id,
@@ -425,12 +428,31 @@ async def get_posts_with_comments(
                 table["post"].c.description,
                 table["post"].c.created_date,
                 table["post"].c.last_modified_date,
+                table["resource"].c.id.label("image_id"),
                 table["resource"].c.directory.label("image_directory"),
                 table["resource"].c.filename.label("image_filename"),
+                table["account"].c.uuid.label("author_uuid"),
+                table["account"].c.email.label("author_email"),
+                table["user"].c.first_name.label("author_first_name"),
+                table["user"].c.last_name.label("author_last_name"),
+                table["user"].c.bio.label("author_bio"),
+                table["user"].c.profile_picture.label("author_profile_picture"),
+                profile_resource.c.directory.label("author_profile_picture_directory"),
+                profile_resource.c.filename.label("author_profile_picture_filename"),
+                profile_resource.c.id.label("author_profile_picture_id"),
             )
             .select_from(
-                table["post"].outerjoin(
+                table["post"]
+                .join(table["account"], table["post"].c.author == table["account"].c.id)
+                .outerjoin(
+                    table["user"], table["user"].c.account_id == table["account"].c.id
+                )
+                .outerjoin(
                     table["resource"], table["post"].c.image == table["resource"].c.id
+                )
+                .outerjoin(
+                    profile_resource,
+                    table["user"].c.profile_picture == profile_resource.c.id,
                 )
             )
             .where(table["post"].c.author == account_id)
@@ -450,6 +472,7 @@ async def get_posts_with_comments(
             post_id = post_dict["id"]
 
             # Fetch top 3 latest comments for this post, joined with user details and profile picture resource
+            comment_resource = table["resource"].alias("comment_resource")
             comment_stmt = (
                 select(
                     table["comment"].c.id.label("comment_id"),
@@ -462,8 +485,9 @@ async def get_posts_with_comments(
                     table["user"].c.last_name,
                     table["user"].c.bio,
                     table["user"].c.profile_picture,
-                    table["resource"].c.directory.label("profile_picture_directory"),
-                    table["resource"].c.filename.label("profile_picture_filename"),
+                    comment_resource.c.directory.label("profile_picture_directory"),
+                    comment_resource.c.filename.label("profile_picture_filename"),
+                    comment_resource.c.id.label("profile_picture_id"),
                 )
                 .select_from(
                     table["comment"]
@@ -476,8 +500,8 @@ async def get_posts_with_comments(
                         table["user"].c.account_id == table["account"].c.id,
                     )
                     .outerjoin(
-                        table["resource"],
-                        table["user"].c.profile_picture == table["resource"].c.id,
+                        comment_resource,
+                        table["user"].c.profile_picture == comment_resource.c.id,
                     )
                 )
                 .where(table["comment"].c.post_id == post_id)
@@ -504,27 +528,58 @@ async def get_posts_with_comments(
                             "bio": data["bio"],
                             "profile_picture": (
                                 {
-                                    "id": data["profile_picture"],
+                                    "id": data["profile_picture_id"],
                                     "directory": data["profile_picture_directory"],
                                     "filename": data["profile_picture_filename"],
                                 }
-                                if data["profile_picture"]
+                                if data["profile_picture_id"]
                                 else None
                             ),
                         },
                     }
                 )
             post_dict["comments"] = comments
-            # Add image resource details to post
+            # Add image resource details to post (all fields)
             post_dict["image"] = (
                 {
-                    "id": post_dict["image"],
+                    "id": post_dict["image_id"],
                     "directory": post_dict["image_directory"],
                     "filename": post_dict["image_filename"],
                 }
-                if post_dict["image"]
+                if post_dict["image_id"]
                 else None
             )
+            # Add author details to post, including joined profile picture resource
+            post_dict["author"] = {
+                "id": post_dict["author"],
+                "uuid": post_dict["author_uuid"],
+                "email": post_dict["author_email"],
+                "first_name": post_dict["author_first_name"],
+                "last_name": post_dict["author_last_name"],
+                "bio": post_dict["author_bio"],
+                "profile_picture": (
+                    {
+                        "id": post_dict["author_profile_picture_id"],
+                        "directory": post_dict["author_profile_picture_directory"],
+                        "filename": post_dict["author_profile_picture_filename"],
+                    }
+                    if post_dict["author_profile_picture_id"]
+                    else None
+                ),
+            }
+            # Remove raw resource and author fields from top-level
+            post_dict.pop("image_id", None)
+            post_dict.pop("image_directory", None)
+            post_dict.pop("image_filename", None)
+            post_dict.pop("author_uuid", None)
+            post_dict.pop("author_email", None)
+            post_dict.pop("author_first_name", None)
+            post_dict.pop("author_last_name", None)
+            post_dict.pop("author_bio", None)
+            post_dict.pop("author_profile_picture", None)
+            post_dict.pop("author_profile_picture_id", None)
+            post_dict.pop("author_profile_picture_directory", None)
+            post_dict.pop("author_profile_picture_filename", None)
             posts.append(post_dict)
 
         return {
