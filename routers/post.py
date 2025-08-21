@@ -658,3 +658,90 @@ async def delete_post(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+
+@router.get("/single/{post_id}", tags=["Get Single Post"])
+async def get_single_post(
+    post_id: int = Path(..., description="The ID of the post to fetch"),
+):
+    try:
+        # Join post with account (author), user/org, and resource (post image)
+        profile_resource = table["resource"].alias("profile_resource")
+        post_stmt = (
+            select(
+                table["post"].c.id,
+                table["post"].c.description,
+                table["post"].c.created_date,
+                table["post"].c.last_modified_date,
+                table["post"].c.image,
+                table["post"].c.author,
+                table["account"].c.uuid.label("author_uuid"),
+                table["account"].c.email.label("author_email"),
+                table["user"].c.first_name.label("author_first_name"),
+                table["user"].c.last_name.label("author_last_name"),
+                table["user"].c.bio.label("author_bio"),
+                table["user"].c.profile_picture.label("author_profile_picture"),
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+                table["resource"].c.id.label("image_id"),
+                profile_resource.c.directory.label("author_profile_picture_directory"),
+                profile_resource.c.filename.label("author_profile_picture_filename"),
+                profile_resource.c.id.label("author_profile_picture_id"),
+            )
+            .select_from(
+                table["post"]
+                .join(table["account"], table["post"].c.author == table["account"].c.id)
+                .outerjoin(
+                    table["user"], table["user"].c.account_id == table["account"].c.id
+                )
+                .outerjoin(
+                    table["resource"], table["post"].c.image == table["resource"].c.id
+                )
+                .outerjoin(
+                    profile_resource,
+                    table["user"].c.profile_picture == profile_resource.c.id,
+                )
+            )
+            .where(table["post"].c.id == post_id)
+        )
+        result = session.execute(post_stmt).first()
+        if not result:
+            raise HTTPException(status_code=404, detail="Post not found")
+        data = result._mapping
+        post = {
+            "id": data["id"],
+            "description": data["description"],
+            "created_date": data["created_date"],
+            "last_modified_date": data["last_modified_date"],
+            "author": {
+                "id": data["author"],
+                "uuid": data["author_uuid"],
+                "email": data["author_email"],
+                "first_name": data["author_first_name"],
+                "last_name": data["author_last_name"],
+                "bio": data["author_bio"],
+                "profile_picture": (
+                    {
+                        "id": data["author_profile_picture_id"],
+                        "directory": data["author_profile_picture_directory"],
+                        "filename": data["author_profile_picture_filename"],
+                    }
+                    if data["author_profile_picture_id"]
+                    else None
+                ),
+            },
+            "image": (
+                {
+                    "id": data["image_id"],
+                    "directory": data["image_directory"],
+                    "filename": data["image_filename"],
+                }
+                if data["image_id"]
+                else None
+            ),
+        }
+        return post
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

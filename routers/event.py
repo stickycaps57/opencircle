@@ -2054,3 +2054,105 @@ async def get_user_events_by_rsvp_status_with_comments(
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{event_id}", tags=["Get Event By ID"])
+async def get_event_by_id(
+    event_id: int = Path(..., description="ID of the event to retrieve")
+):
+    try:
+        # Create an alias for the resource table for organization logo
+        logo_resource = table["resource"].alias("logo_resource")
+
+        stmt = (
+            select(
+                table["event"],
+                table["organization"].c.id.label("org_id"),
+                table["organization"].c.name.label("org_name"),
+                table["organization"].c.description.label("org_description"),
+                table["organization"].c.logo.label("org_logo"),
+                logo_resource.c.directory.label("logo_directory"),
+                logo_resource.c.filename.label("logo_filename"),
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
+            )
+            .select_from(
+                table["event"]
+                .join(
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
+                )
+                .outerjoin(
+                    table["resource"],
+                    table["event"].c.image == table["resource"].c.id,
+                )
+                .outerjoin(
+                    logo_resource,
+                    table["organization"].c.logo == logo_resource.c.id,
+                )
+                .outerjoin(
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
+                )
+            )
+            .where(table["event"].c.id == event_id)
+        )
+        result = session.execute(stmt).fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        event_data = dict(result._mapping)
+        event_data["organization"] = {
+            "id": event_data.pop("org_id"),
+            "name": event_data.pop("org_name"),
+            "description": event_data.pop("org_description"),
+            "logo": (
+                {
+                    "id": event_data.get("org_logo"),
+                    "directory": event_data.get("logo_directory"),
+                    "filename": event_data.get("logo_filename"),
+                }
+                if event_data.get("org_logo")
+                else None
+            ),
+        }
+        event_data.pop("org_logo", None)
+        event_data.pop("logo_directory", None)
+        event_data.pop("logo_filename", None)
+        event_data["image"] = (
+            {
+                "id": event_data.get("image"),
+                "directory": event_data.get("image_directory"),
+                "filename": event_data.get("image_filename"),
+            }
+            if event_data.get("image")
+            else None
+        )
+        event_data.pop("image_directory", None)
+        event_data.pop("image_filename", None)
+        event_data["address"] = {
+            "id": event_data.get("address_id"),
+            "country": event_data.get("address_country"),
+            "province": event_data.get("address_province"),
+            "city": event_data.get("address_city"),
+            "barangay": event_data.get("address_barangay"),
+            "house_building_number": event_data.get("address_house_building_number"),
+        }
+        event_data.pop("address_country", None)
+        event_data.pop("address_province", None)
+        event_data.pop("address_city", None)
+        event_data.pop("address_barangay", None)
+        event_data.pop("address_house_building_number", None)
+
+        return {"event": event_data}
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
