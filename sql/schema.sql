@@ -1,5 +1,3 @@
--- opencircle.address definition
-
 CREATE TABLE `address` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `country` varchar(255) NOT NULL,
@@ -14,10 +12,7 @@ CREATE TABLE `address` (
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
   `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.resource definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `resource` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -25,10 +20,7 @@ CREATE TABLE `resource` (
   `filename` varchar(100) NOT NULL,
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=35 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.`role` definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `role` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -36,10 +28,7 @@ CREATE TABLE `role` (
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `name` (`name`)
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.account definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `account` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -55,10 +44,7 @@ CREATE TABLE `account` (
   KEY `role_id` (`role_id`),
   KEY `account_email_password_IDX` (`email`,`password`) USING BTREE,
   CONSTRAINT `account_ibfk_1` FOREIGN KEY (`role_id`) REFERENCES `role` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=25 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.organization definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `organization` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -74,10 +60,7 @@ CREATE TABLE `organization` (
   KEY `organization_resource_FK` (`logo`),
   CONSTRAINT `organization_account_FK` FOREIGN KEY (`account_id`) REFERENCES `account` (`id`) ON DELETE CASCADE,
   CONSTRAINT `organization_resource_FK` FOREIGN KEY (`logo`) REFERENCES `resource` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.post definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `post` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -91,10 +74,7 @@ CREATE TABLE `post` (
   KEY `post_resource_FK` (`image`),
   CONSTRAINT `post_account_FK` FOREIGN KEY (`author`) REFERENCES `account` (`id`) ON DELETE CASCADE,
   CONSTRAINT `post_resource_FK` FOREIGN KEY (`image`) REFERENCES `resource` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.`session` definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `session` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -109,10 +89,7 @@ CREATE TABLE `session` (
   UNIQUE KEY `session_token` (`session_token`),
   KEY `session_account_FK` (`account_uuid`),
   CONSTRAINT `session_account_FK` FOREIGN KEY (`account_uuid`) REFERENCES `account` (`uuid`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.`user` definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `user` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -128,10 +105,7 @@ CREATE TABLE `user` (
   KEY `user_account_FK` (`account_id`),
   CONSTRAINT `user_account_FK` FOREIGN KEY (`account_id`) REFERENCES `account` (`id`) ON DELETE CASCADE,
   CONSTRAINT `user_resource_FK` FOREIGN KEY (`profile_picture`) REFERENCES `resource` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.event definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `event` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -150,10 +124,7 @@ CREATE TABLE `event` (
   CONSTRAINT `event_address_FK` FOREIGN KEY (`address_id`) REFERENCES `address` (`id`),
   CONSTRAINT `event_organization_FK` FOREIGN KEY (`organization_id`) REFERENCES `organization` (`id`) ON DELETE CASCADE,
   CONSTRAINT `event_resource_FK` FOREIGN KEY (`image`) REFERENCES `resource` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.membership definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `membership` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -167,10 +138,7 @@ CREATE TABLE `membership` (
   KEY `membership_user_FK` (`user_id`),
   CONSTRAINT `membership_organization_FK` FOREIGN KEY (`organization_id`) REFERENCES `organization` (`id`) ON DELETE CASCADE,
   CONSTRAINT `membership_user_FK` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.rsvp definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `rsvp` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -184,10 +152,7 @@ CREATE TABLE `rsvp` (
   KEY `rsvp_event_FK` (`event_id`),
   CONSTRAINT `rsvp_account_FK` FOREIGN KEY (`attendee`) REFERENCES `account` (`id`) ON DELETE CASCADE,
   CONSTRAINT `rsvp_event_FK` FOREIGN KEY (`event_id`) REFERENCES `event` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
-
--- opencircle.comment definition
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `comment` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -204,4 +169,4 @@ CREATE TABLE `comment` (
   CONSTRAINT `comments_account_FK` FOREIGN KEY (`author`) REFERENCES `account` (`id`) ON DELETE CASCADE,
   CONSTRAINT `comments_event_FK` FOREIGN KEY (`event_id`) REFERENCES `event` (`id`) ON DELETE CASCADE,
   CONSTRAINT `comments_post_FK` FOREIGN KEY (`post_id`) REFERENCES `post` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
