@@ -522,6 +522,10 @@ async def get_active_events_by_organizer(
                 table["address"].c.house_building_number.label(
                     "address_house_building_number"
                 ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
             )
             .select_from(
                 table["event"]
@@ -558,7 +562,7 @@ async def get_active_events_by_organizer(
             )
             event_data.pop("image_directory", None)
             event_data.pop("image_filename", None)
-            # Group address details (including house_building_number inside address)
+            # Group address details (including house_building_number and codes inside address)
             event_data["address"] = {
                 "id": event_data["address_id"],
                 "country": event_data["address_country"],
@@ -566,12 +570,20 @@ async def get_active_events_by_organizer(
                 "city": event_data["address_city"],
                 "barangay": event_data["address_barangay"],
                 "house_building_number": event_data["address_house_building_number"],
+                "country_code": event_data["address_country_code"],
+                "province_code": event_data["address_province_code"],
+                "city_code": event_data["address_city_code"],
+                "barangay_code": event_data["address_barangay_code"],
             }
             event_data.pop("address_country", None)
             event_data.pop("address_province", None)
             event_data.pop("address_city", None)
             event_data.pop("address_barangay", None)
             event_data.pop("address_house_building_number", None)
+            event_data.pop("address_country_code", None)
+            event_data.pop("address_province_code", None)
+            event_data.pop("address_city_code", None)
+            event_data.pop("address_barangay_code", None)
             event_data["members"] = []
             event_data["pending_rsvps"] = []
             events_dict[event_id] = event_data
@@ -779,6 +791,7 @@ async def get_active_events_by_organizer(
 
 
 @router.get("/organizer/past", tags=["Get Past Events by Organizer"])
+@router.get("/organizer/past", tags=["Get Past Events by Organizer"])
 async def get_past_events_by_organizer(
     account_uuid: str = Query(..., description="Account UUID of the organizer")
 ):
@@ -819,6 +832,10 @@ async def get_past_events_by_organizer(
                 table["address"].c.house_building_number.label(
                     "address_house_building_number"
                 ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
             )
             .select_from(
                 table["event"]
@@ -855,7 +872,7 @@ async def get_past_events_by_organizer(
             )
             event_data.pop("image_directory", None)
             event_data.pop("image_filename", None)
-            # Group address details (including house_building_number inside address)
+            # Group address details (including house_building_number and codes inside address)
             event_data["address"] = {
                 "id": event_data["address_id"],
                 "country": event_data["address_country"],
@@ -863,12 +880,20 @@ async def get_past_events_by_organizer(
                 "city": event_data["address_city"],
                 "barangay": event_data["address_barangay"],
                 "house_building_number": event_data["address_house_building_number"],
+                "country_code": event_data["address_country_code"],
+                "province_code": event_data["address_province_code"],
+                "city_code": event_data["address_city_code"],
+                "barangay_code": event_data["address_barangay_code"],
             }
             event_data.pop("address_country", None)
             event_data.pop("address_province", None)
             event_data.pop("address_city", None)
             event_data.pop("address_barangay", None)
             event_data.pop("address_house_building_number", None)
+            event_data.pop("address_country_code", None)
+            event_data.pop("address_province_code", None)
+            event_data.pop("address_city_code", None)
+            event_data.pop("address_barangay_code", None)
             event_data["members"] = []
             event_data["pending_rsvps"] = []
             events_dict[event_id] = event_data
@@ -1115,6 +1140,10 @@ async def get_events_by_month_year(
                 table["address"].c.house_building_number.label(
                     "address_house_building_number"
                 ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
                 table["resource"].c.directory.label("image_directory"),
                 table["resource"].c.filename.label("image_filename"),
             )
@@ -1158,12 +1187,20 @@ async def get_events_by_month_year(
                 "city": event["address_city"],
                 "barangay": event["address_barangay"],
                 "house_building_number": event["address_house_building_number"],
+                "country_code": event["address_country_code"],
+                "province_code": event["address_province_code"],
+                "city_code": event["address_city_code"],
+                "barangay_code": event["address_barangay_code"],
             }
             event.pop("address_country", None)
             event.pop("address_province", None)
             event.pop("address_city", None)
             event.pop("address_barangay", None)
             event.pop("address_house_building_number", None)
+            event.pop("address_country_code", None)
+            event.pop("address_province_code", None)
+            event.pop("address_city_code", None)
+            event.pop("address_barangay_code", None)
             past_events.append(event)
 
         # Active events: today or future, status active
@@ -1177,6 +1214,10 @@ async def get_events_by_month_year(
                 table["address"].c.house_building_number.label(
                     "address_house_building_number"
                 ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
                 table["resource"].c.directory.label("image_directory"),
                 table["resource"].c.filename.label("image_filename"),
             )
@@ -1220,12 +1261,20 @@ async def get_events_by_month_year(
                 "city": event["address_city"],
                 "barangay": event["address_barangay"],
                 "house_building_number": event["address_house_building_number"],
+                "country_code": event["address_country_code"],
+                "province_code": event["address_province_code"],
+                "city_code": event["address_city_code"],
+                "barangay_code": event["address_barangay_code"],
             }
             event.pop("address_country", None)
             event.pop("address_province", None)
             event.pop("address_city", None)
             event.pop("address_barangay", None)
             event.pop("address_house_building_number", None)
+            event.pop("address_country_code", None)
+            event.pop("address_province_code", None)
+            event.pop("address_city_code", None)
+            event.pop("address_barangay_code", None)
             active_events.append(event)
 
         return {
@@ -1373,6 +1422,10 @@ async def get_all_events_with_comments(
                 table["address"].c.house_building_number.label(
                     "address_house_building_number"
                 ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
             )
             .select_from(
                 table["event"]
@@ -1431,7 +1484,7 @@ async def get_all_events_with_comments(
             )
             event_data.pop("image_directory", None)
             event_data.pop("image_filename", None)
-            # Group address details
+            # Group address details (now with 4 new fields)
             event_data["address"] = {
                 "id": event_data.get("address_id"),
                 "country": event_data.get("address_country"),
@@ -1441,12 +1494,20 @@ async def get_all_events_with_comments(
                 "house_building_number": event_data.get(
                     "address_house_building_number"
                 ),
+                "country_code": event_data.get("address_country_code"),
+                "province_code": event_data.get("address_province_code"),
+                "city_code": event_data.get("address_city_code"),
+                "barangay_code": event_data.get("address_barangay_code"),
             }
             event_data.pop("address_country", None)
             event_data.pop("address_province", None)
             event_data.pop("address_city", None)
             event_data.pop("address_barangay", None)
             event_data.pop("address_house_building_number", None)
+            event_data.pop("address_country_code", None)
+            event_data.pop("address_province_code", None)
+            event_data.pop("address_city_code", None)
+            event_data.pop("address_barangay_code", None)
             events.append(event_data)
 
         # For each event, get top 3 latest comments (including profile_picture joined with resource)
@@ -1573,6 +1634,10 @@ async def get_user_rsvped_events_by_month_year(
                 table["address"].c.house_building_number.label(
                     "address_house_building_number"
                 ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
                 table["organization"].c.id.label("organization_id"),
                 table["organization"].c.name.label("organization_name"),
                 table["organization"].c.description.label("organization_description"),
@@ -1621,12 +1686,20 @@ async def get_user_rsvped_events_by_month_year(
                 "city": event_data["address_city"],
                 "barangay": event_data["address_barangay"],
                 "house_building_number": event_data["address_house_building_number"],
+                "country_code": event_data.get("address_country_code"),
+                "province_code": event_data.get("address_province_code"),
+                "city_code": event_data.get("address_city_code"),
+                "barangay_code": event_data.get("address_barangay_code"),
             }
             event_data.pop("address_country", None)
             event_data.pop("address_province", None)
             event_data.pop("address_city", None)
             event_data.pop("address_barangay", None)
             event_data.pop("address_house_building_number", None)
+            event_data.pop("address_country_code", None)
+            event_data.pop("address_province_code", None)
+            event_data.pop("address_city_code", None)
+            event_data.pop("address_barangay_code", None)
 
             event_data["organization"] = {
                 "id": event_data.pop("organization_id"),
@@ -1712,6 +1785,10 @@ async def get_user_events_with_comments(
                 table["address"].c.house_building_number.label(
                     "address_house_building_number"
                 ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
                 table["resource"].c.directory.label("image_directory"),
                 table["resource"].c.filename.label("image_filename"),
                 table["organization"].c.id.label("org_id"),
@@ -1756,12 +1833,20 @@ async def get_user_events_with_comments(
                 "city": event.get("address_city"),
                 "barangay": event.get("address_barangay"),
                 "house_building_number": event.get("address_house_building_number"),
+                "country_code": event.get("address_country_code"),
+                "province_code": event.get("address_province_code"),
+                "city_code": event.get("address_city_code"),
+                "barangay_code": event.get("address_barangay_code"),
             }
             event.pop("address_country", None)
             event.pop("address_province", None)
             event.pop("address_city", None)
             event.pop("address_barangay", None)
             event.pop("address_house_building_number", None)
+            event.pop("address_country_code", None)
+            event.pop("address_province_code", None)
+            event.pop("address_city_code", None)
+            event.pop("address_barangay_code", None)
 
             event["image"] = (
                 {
@@ -1931,6 +2016,10 @@ async def get_user_events_by_rsvp_status_with_comments(
                 table["address"].c.house_building_number.label(
                     "address_house_building_number"
                 ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
                 table["resource"].c.directory.label("image_directory"),
                 table["resource"].c.filename.label("image_filename"),
                 table["organization"].c.id.label("org_id"),
@@ -1980,12 +2069,20 @@ async def get_user_events_by_rsvp_status_with_comments(
                 "city": event.get("address_city"),
                 "barangay": event.get("address_barangay"),
                 "house_building_number": event.get("address_house_building_number"),
+                "country_code": event.get("address_country_code"),
+                "province_code": event.get("address_province_code"),
+                "city_code": event.get("address_city_code"),
+                "barangay_code": event.get("address_barangay_code"),
             }
             event.pop("address_country", None)
             event.pop("address_province", None)
             event.pop("address_city", None)
             event.pop("address_barangay", None)
             event.pop("address_house_building_number", None)
+            event.pop("address_country_code", None)
+            event.pop("address_province_code", None)
+            event.pop("address_city_code", None)
+            event.pop("address_barangay_code", None)
 
             event["image"] = (
                 {
@@ -2125,6 +2222,10 @@ async def get_event_by_id(
                 table["address"].c.house_building_number.label(
                     "address_house_building_number"
                 ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
             )
             .select_from(
                 table["event"]
@@ -2187,12 +2288,20 @@ async def get_event_by_id(
             "city": event_data.get("address_city"),
             "barangay": event_data.get("address_barangay"),
             "house_building_number": event_data.get("address_house_building_number"),
+            "country_code": event_data.get("address_country_code"),
+            "province_code": event_data.get("address_province_code"),
+            "city_code": event_data.get("address_city_code"),
+            "barangay_code": event_data.get("address_barangay_code"),
         }
         event_data.pop("address_country", None)
         event_data.pop("address_province", None)
         event_data.pop("address_city", None)
         event_data.pop("address_barangay", None)
         event_data.pop("address_house_building_number", None)
+        event_data.pop("address_country_code", None)
+        event_data.pop("address_province_code", None)
+        event_data.pop("address_city_code", None)
+        event_data.pop("address_barangay_code", None)
 
         return {"event": event_data}
     except SQLAlchemyError as e:
