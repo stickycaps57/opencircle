@@ -296,6 +296,10 @@ async def update_event(
     city: Optional[str] = Form(None),
     barangay: Optional[str] = Form(None),
     house_building_number: Optional[str] = Form(None),
+    country_code: Optional[str] = Form(None),
+    province_code: Optional[str] = Form(None),
+    city_code: Optional[str] = Form(None),
+    barangay_code: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     session_token: str = Cookie(None, alias="session_token"),
@@ -350,7 +354,17 @@ async def update_event(
             update_data["description"] = description
 
         # Update address if any address field is provided
-        address_fields = [country, province, city, barangay, house_building_number]
+        address_fields = [
+            country,
+            province,
+            city,
+            barangay,
+            house_building_number,
+            country_code,
+            province_code,
+            city_code,
+            barangay_code,
+        ]
         if any(field is not None for field in address_fields):
             address_id = event._mapping["address_id"]
             update_address(
@@ -360,6 +374,10 @@ async def update_event(
                 city=city,
                 barangay=barangay,
                 house_building_number=house_building_number,
+                country_code=country_code,
+                province_code=province_code,
+                city_code=city_code,
+                barangay_code=barangay_code,
             )
 
         # Update image if provided

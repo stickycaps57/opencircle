@@ -44,8 +44,11 @@ def update_address(
     city: str = None,
     barangay: str = None,
     house_building_number: str = None,
+    country_code: str = None,
+    province_code: str = None,
+    city_code: str = None,
+    barangay_code: str = None,
 ):
-
     update_values = {}
     if country is not None:
         update_values["country"] = country
@@ -57,6 +60,14 @@ def update_address(
         update_values["barangay"] = barangay
     if house_building_number is not None:
         update_values["house_building_number"] = house_building_number
+    if country_code is not None:
+        update_values["country_code"] = country_code
+    if province_code is not None:
+        update_values["province_code"] = province_code
+    if city_code is not None:
+        update_values["city_code"] = city_code
+    if barangay_code is not None:
+        update_values["barangay_code"] = barangay_code
     if not update_values:
         return False  # Nothing to update
 
