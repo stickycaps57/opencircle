@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 
 # from .dependencies import get_query_token, get_token_header
 # from .internal import admin
@@ -44,4 +45,4 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Hello Bigger Applications!"}
+    return RedirectResponse(url="/docs")
