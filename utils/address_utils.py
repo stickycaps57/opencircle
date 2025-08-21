@@ -14,6 +14,10 @@ def add_address(
     city: str,
     barangay: str,
     house_building_number: str,
+    country_code: str = None,
+    province_code: str = None,
+    city_code: str = None,
+    barangay_code: str = None,
 ):
     stmt = insert(table["address"]).values(
         country=country,
@@ -21,6 +25,10 @@ def add_address(
         city=city,
         barangay=barangay,
         house_building_number=house_building_number,
+        country_code=country_code,
+        province_code=province_code,
+        city_code=city_code,
+        barangay_code=barangay_code,
     )
     try:
         result = session.execute(stmt)

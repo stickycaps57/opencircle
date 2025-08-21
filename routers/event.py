@@ -56,6 +56,10 @@ async def create_event(
     city: str = Form(...),
     barangay: str = Form(...),
     house_building_number: str = Form(...),
+    country_code: str = Form(...),
+    province_code: str = Form(...),
+    city_code: str = Form(...),
+    barangay_code: str = Form(...),
     description: str = Form(...),
     image: Optional[UploadFile] = File(None),
     session_token: str = Cookie(None, alias="session_token"),
@@ -86,13 +90,17 @@ async def create_event(
         if image:
             image_id = add_resource(image, account_uuid)
 
-        # Insert address first
+        # Insert address first, now with codes
         address_id = add_address(
             country,
             province,
             city,
             barangay,
             house_building_number,
+            country_code,
+            province_code,
+            city_code,
+            barangay_code,
         )
 
         # Insert event using schema.sql columns
