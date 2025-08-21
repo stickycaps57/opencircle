@@ -791,7 +791,6 @@ async def get_active_events_by_organizer(
 
 
 @router.get("/organizer/past", tags=["Get Past Events by Organizer"])
-@router.get("/organizer/past", tags=["Get Past Events by Organizer"])
 async def get_past_events_by_organizer(
     account_uuid: str = Query(..., description="Account UUID of the organizer")
 ):
