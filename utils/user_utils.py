@@ -16,7 +16,21 @@ session = db.session
 
 
 def create_user(user: UserModel):
-    resource_id = add_resource(user.profile_picture, user.uuid)
+
+    # additional checker for profile_picture to identify if empty or not
+    if (
+        user.profile_picture
+        and user.profile_picture.filename
+        and user.profile_picture.size > 0
+    ):
+
+        resource_id = add_resource(user.profile_picture, user.uuid)
+    else:
+        resource_id = None
+        print(
+            "No valid logo provided, skipping file upload and resource table data creation"
+        )
+
     print(f"Resource ID: {resource_id}")
 
     stmt = insert(table["user"]).values(

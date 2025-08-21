@@ -16,7 +16,16 @@ session = db.session
 
 
 def create_organization(organization: OrganizationModel):
-    resource_id = add_resource(organization.logo, organization.uuid)
+
+    # additional checker for logo to identify if empty or not
+    if organization.logo and organization.logo.filename and organization.logo.size > 0:
+        resource_id = add_resource(organization.logo, organization.uuid)
+    else:
+        resource_id = None
+        print(
+            "No valid logo provided, skipping file upload and resource table data creation"
+        )
+
     print(f"Resource ID: {resource_id}")
 
     stmt = insert(table["organization"]).values(
