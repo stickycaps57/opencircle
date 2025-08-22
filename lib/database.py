@@ -31,7 +31,8 @@ SessionLocal = sessionmaker(bind=engine)
 class Database:
     def __init__(self):
         self._engine = engine
-        self._session = SessionLocal()
+        # commented this line since it always get old or stale data
+        # self._session = SessionLocal()
         self._tables = self._get_tables()
 
     @property
@@ -40,7 +41,9 @@ class Database:
 
     @property
     def session(self) -> Session:
-        return self._session
+        # return self._session
+        # added this line to get fresh data
+        return SessionLocal()
 
     @property
     def tables(self) -> Dict[str, Table]:

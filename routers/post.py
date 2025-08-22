@@ -11,7 +11,7 @@ from fastapi import (
 from pydantic import BaseModel, constr
 from lib.database import Database
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, func
 from typing import Optional
 from utils.resource_utils import add_resource, delete_resource, get_resource
 from lib.models import PostModel
@@ -27,7 +27,7 @@ router = APIRouter(
 
 db = Database()
 table = db.tables
-session = db.session
+# session = db.session
 
 
 @router.post("/", tags=["Create Post"])
@@ -36,6 +36,8 @@ async def create_post(
     description: str = Form(None),
     session_token: str = Cookie(None, alias="session_token"),
 ):
+    session = db.session
+
     try:
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
@@ -75,6 +77,7 @@ async def get_all_posts(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Posts per page"),
 ):
+    session = db.session
     try:
         offset = (page - 1) * page_size
         profile_resource = table["resource"].alias("profile_resource")
@@ -240,6 +243,7 @@ async def get_posts(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(5, ge=1, le=100, description="Posts per page"),
 ):
+    session = db.session
     try:
         # Get account details
         account_stmt = select(table["account"]).where(
@@ -405,6 +409,7 @@ async def get_posts_with_comments(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(5, ge=1, le=100, description="Posts per page"),
 ):
+    session = db.session
     try:
         # Get account_id from uuid
         select_stmt = select(table["account"].c.id).where(
@@ -471,6 +476,14 @@ async def get_posts_with_comments(
             post_dict = dict(row._mapping)
             post_id = post_dict["id"]
 
+            # Fetch total comments for this post
+            comment_count_stmt = (
+                select(func.count(table["comment"].c.id))
+                .where(table["comment"].c.post_id == post_id)
+            )
+            total_comments = session.execute(comment_count_stmt).scalar() or 0
+
+
             # Fetch top 3 latest comments for this post, joined with user details and profile picture resource
             comment_resource = table["resource"].alias("comment_resource")
             comment_stmt = (
@@ -508,6 +521,7 @@ async def get_posts_with_comments(
                 .order_by(table["comment"].c.created_date.desc())
                 .limit(3)
             )
+
             comments_result = session.execute(comment_stmt).fetchall()
             comments = []
             for comment in comments_result:
@@ -538,6 +552,8 @@ async def get_posts_with_comments(
                         },
                     }
                 )
+
+            post_dict["total_comments"] = total_comments
             post_dict["comments"] = comments
             # Add image resource details to post (all fields)
             post_dict["image"] = (
@@ -601,6 +617,7 @@ async def update_post(
     image: UploadFile = File(None),
     session_token: str = Cookie(None, alias="session_token"),
 ):
+    session = db.session
     try:
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
@@ -664,6 +681,7 @@ async def delete_post(
     post_id: int = Path(..., description="The ID of the post to delete"),
     session_token: str = Cookie(None, alias="session_token"),
 ):
+    session = db.session
     try:
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
@@ -719,6 +737,7 @@ async def delete_post(
 async def get_single_post(
     post_id: int = Path(..., description="The ID of the post to fetch"),
 ):
+    session = db.session
     try:
         # Join post with account (author), user/org, and resource (post image)
         profile_resource = table["resource"].alias("profile_resource")
