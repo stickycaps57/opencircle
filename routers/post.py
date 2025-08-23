@@ -81,6 +81,7 @@ async def get_all_posts(
     try:
         offset = (page - 1) * page_size
         profile_resource = table["resource"].alias("profile_resource")
+        org_logo_resource = table["resource"].alias("org_logo_resource")
         post_stmt = (
             select(
                 table["post"].c.id,
@@ -125,7 +126,7 @@ async def get_all_posts(
             data = row._mapping
             post_id = data["id"]
 
-            # Fetch top 3 latest comments for this post, join user profile_picture to resource
+            # Fetch top 3 latest comments for this post, join user/org profile_picture/logo to resource
             comment_resource = table["resource"].alias("comment_resource")
             comment_stmt = (
                 select(
@@ -135,6 +136,8 @@ async def get_all_posts(
                     table["account"].c.id.label("account_id"),
                     table["account"].c.uuid,
                     table["account"].c.email,
+                    table["account"].c.role_id,
+                    table["role"].c.name.label("role_name"),
                     table["user"].c.first_name,
                     table["user"].c.last_name,
                     table["user"].c.bio,
@@ -142,12 +145,24 @@ async def get_all_posts(
                     comment_resource.c.directory.label("profile_picture_directory"),
                     comment_resource.c.filename.label("profile_picture_filename"),
                     comment_resource.c.id.label("profile_picture_id"),
+                    table["organization"].c.name.label("organization_name"),
+                    table["organization"].c.description.label(
+                        "organization_description"
+                    ),
+                    table["organization"].c.logo.label("organization_logo"),
+                    org_logo_resource.c.directory.label("organization_logo_directory"),
+                    org_logo_resource.c.filename.label("organization_logo_filename"),
+                    org_logo_resource.c.id.label("organization_logo_id"),
                 )
                 .select_from(
                     table["comment"]
                     .join(
                         table["account"],
                         table["comment"].c.author == table["account"].c.id,
+                    )
+                    .join(
+                        table["role"],
+                        table["account"].c.role_id == table["role"].c.id,
                     )
                     .outerjoin(
                         table["user"],
@@ -156,6 +171,14 @@ async def get_all_posts(
                     .outerjoin(
                         comment_resource,
                         table["user"].c.profile_picture == comment_resource.c.id,
+                    )
+                    .outerjoin(
+                        table["organization"],
+                        table["organization"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        org_logo_resource,
+                        table["organization"].c.logo == org_logo_resource.c.id,
                     )
                 )
                 .where(table["comment"].c.post_id == post_id)
@@ -166,32 +189,61 @@ async def get_all_posts(
             comments = []
             for comment in comments_result:
                 cdata = comment._mapping
-                comments.append(
-                    {
-                        "comment_id": cdata["comment_id"],
-                        "message": cdata["message"],
-                        "created_date": cdata["created_date"],
-                        "account": {
-                            "id": cdata["account_id"],
-                            "uuid": cdata["uuid"],
-                            "email": cdata["email"],
-                        },
-                        "user": {
-                            "first_name": cdata["first_name"],
-                            "last_name": cdata["last_name"],
-                            "bio": cdata["bio"],
-                            "profile_picture": (
-                                {
-                                    "id": cdata["profile_picture_id"],
-                                    "directory": cdata["profile_picture_directory"],
-                                    "filename": cdata["profile_picture_filename"],
-                                }
-                                if cdata["profile_picture_id"]
-                                else None
-                            ),
-                        },
-                    }
-                )
+                if cdata["role_name"] == "organization":
+                    comments.append(
+                        {
+                            "comment_id": cdata["comment_id"],
+                            "message": cdata["message"],
+                            "created_date": cdata["created_date"],
+                            "account": {
+                                "id": cdata["account_id"],
+                                "uuid": cdata["uuid"],
+                                "email": cdata["email"],
+                            },
+                            "organization": {
+                                "name": cdata["organization_name"],
+                                "description": cdata["organization_description"],
+                                "logo": (
+                                    {
+                                        "id": cdata["organization_logo_id"],
+                                        "directory": cdata[
+                                            "organization_logo_directory"
+                                        ],
+                                        "filename": cdata["organization_logo_filename"],
+                                    }
+                                    if cdata["organization_logo_id"]
+                                    else None
+                                ),
+                            },
+                        }
+                    )
+                else:
+                    comments.append(
+                        {
+                            "comment_id": cdata["comment_id"],
+                            "message": cdata["message"],
+                            "created_date": cdata["created_date"],
+                            "account": {
+                                "id": cdata["account_id"],
+                                "uuid": cdata["uuid"],
+                                "email": cdata["email"],
+                            },
+                            "user": {
+                                "first_name": cdata["first_name"],
+                                "last_name": cdata["last_name"],
+                                "bio": cdata["bio"],
+                                "profile_picture": (
+                                    {
+                                        "id": cdata["profile_picture_id"],
+                                        "directory": cdata["profile_picture_directory"],
+                                        "filename": cdata["profile_picture_filename"],
+                                    }
+                                    if cdata["profile_picture_id"]
+                                    else None
+                                ),
+                            },
+                        }
+                    )
 
             posts.append(
                 {
@@ -235,6 +287,8 @@ async def get_all_posts(
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
 
 
 @router.get("/{account_uuid}", tags=["Get Posts of User or Organization"])
