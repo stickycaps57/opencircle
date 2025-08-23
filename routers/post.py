@@ -421,6 +421,13 @@ async def get_posts_with_comments(
 
         offset = (page - 1) * page_size
 
+        # Get total count of posts for this account
+        total_count_stmt = (
+            select(func.count(table["post"].c.id))
+            .where(table["post"].c.author == account_id)
+        )
+        total_count = session.execute(total_count_stmt).scalar() or 0
+
         # Alias for profile picture resource
         profile_resource = table["resource"].alias("profile_resource")
 
@@ -602,7 +609,8 @@ async def get_posts_with_comments(
             "page": page,
             "page_size": page_size,
             "posts": posts,
-            "count": len(posts),
+            # "count": len(posts),
+            "total": total_count,
         }
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
