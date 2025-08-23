@@ -794,11 +794,11 @@ async def get_event_rsvps(
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
 
+
 # modified original function to include pagination and frequency total for events, event's members & requests
 @router.get("/organizer/active", tags=["Get Active Events by Organizer"])
 async def get_active_events_by_organizer(
     account_uuid: str = Query(..., description="Account UUID of the organizer"),
-
     # changes #1 start (add pagination parameters)
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(5, ge=1, le=100, description="Events per page"),
@@ -826,12 +826,9 @@ async def get_active_events_by_organizer(
         offset = (page - 1) * page_size
 
         # Get total count of active events for this organization
-        total_count_stmt = (
-            select(func.count(table["event"].c.id))
-            .where(
-                (table["event"].c.organization_id == organization_id)
-                & (table["event"].c.event_date >= func.current_date())
-            )
+        total_count_stmt = select(func.count(table["event"].c.id)).where(
+            (table["event"].c.organization_id == organization_id)
+            & (table["event"].c.event_date >= func.current_date())
         )
         total_count = session.execute(total_count_stmt).scalar() or 0
         # changes #2 end
@@ -845,7 +842,7 @@ async def get_active_events_by_organizer(
             select(
                 table["event"].c.id,
                 table["event"].c.organization_id,
-                 # change #13.2 start (added organization fields)
+                # change #13.2 start (added organization fields)
                 table["organization"].c.name.label("organization_name"),
                 table["organization"].c.logo.label("organization_logo_id"),
                 organization_resource.c.directory.label("organization_logo_directory"),
@@ -875,20 +872,19 @@ async def get_active_events_by_organizer(
             .select_from(
                 table["event"]
                 .outerjoin(
-                    table["organization"], 
-                    table["event"].c.organization_id == table["organization"].c.id
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
                 )
                 .outerjoin(
                     organization_resource,
-                    table["organization"].c.logo == organization_resource.c.id
+                    table["organization"].c.logo == organization_resource.c.id,
                 )
                 .outerjoin(
-                    table["resource"], 
-                    table["event"].c.image == table["resource"].c.id
+                    table["resource"], table["event"].c.image == table["resource"].c.id
                 )
                 .outerjoin(
                     table["address"],
-                    table["event"].c.address_id == table["address"].c.id
+                    table["event"].c.address_id == table["address"].c.id,
                 )
             )
             .where(
@@ -923,7 +919,7 @@ async def get_active_events_by_organizer(
             )
             event_data.pop("image_directory", None)
             event_data.pop("image_filename", None)
-            
+
             # Group address details (including house_building_number and codes inside address)
             event_data["address"] = {
                 "id": event_data["address_id"],
@@ -974,23 +970,17 @@ async def get_active_events_by_organizer(
             # changes #13 end
 
             # changes #5 start (total count of members for this event)
-            members_count_stmt = (
-                select(func.count(table["rsvp"].c.id))
-                .where(
-                    (table["rsvp"].c.event_id == event_id)
-                    & (table["rsvp"].c.status == "joined")
-                )
+            members_count_stmt = select(func.count(table["rsvp"].c.id)).where(
+                (table["rsvp"].c.event_id == event_id)
+                & (table["rsvp"].c.status == "joined")
             )
             total_members = session.execute(members_count_stmt).scalar() or 0
             # change #5 end
 
             # change #6 start (total count of pending RSVPs for this event)
-            pending_count_stmt = (
-                select(func.count(table["rsvp"].c.id))
-                .where(
-                    (table["rsvp"].c.event_id == event_id)
-                    & (table["rsvp"].c.status == "pending")
-                )
+            pending_count_stmt = select(func.count(table["rsvp"].c.id)).where(
+                (table["rsvp"].c.event_id == event_id)
+                & (table["rsvp"].c.status == "pending")
             )
             total_pending_rsvps = session.execute(pending_count_stmt).scalar() or 0
             # change #6 end
@@ -1124,14 +1114,15 @@ async def get_active_events_by_organizer(
                 )
 
             # change #7 (create separate aliases for resource)
-            comment_profile_resource = table["resource"].alias("comment_profile_resource")
+            comment_profile_resource = table["resource"].alias(
+                "comment_profile_resource"
+            )
             comment_logo_resource = table["resource"].alias("comment_logo_resource")
             # change #7 end
-            
+
             # change #14 start (added total comments for this event)
-            comment_count_stmt = (
-                select(func.count(table["comment"].c.id))
-                .where(table["comment"].c.event_id == event_id)
+            comment_count_stmt = select(func.count(table["comment"].c.id)).where(
+                table["comment"].c.event_id == event_id
             )
             total_comments = session.execute(comment_count_stmt).scalar() or 0
             # change #15 end
@@ -1151,14 +1142,22 @@ async def get_active_events_by_organizer(
                     table["user"].c.first_name.label("user_first_name"),
                     table["user"].c.last_name.label("user_last_name"),
                     table["user"].c.profile_picture.label("profile_picture_id"),
-                    comment_profile_resource.c.directory.label("profile_picture_directory"),
-                    comment_profile_resource.c.filename.label("profile_picture_filename"),
-                    # Organization fields 
+                    comment_profile_resource.c.directory.label(
+                        "profile_picture_directory"
+                    ),
+                    comment_profile_resource.c.filename.label(
+                        "profile_picture_filename"
+                    ),
+                    # Organization fields
                     table["organization"].c.name.label("organization_name"),
                     table["organization"].c.category.label("organization_category"),
                     table["organization"].c.logo.label("organization_logo_id"),
-                    comment_logo_resource.c.directory.label("organization_logo_directory"),
-                    comment_logo_resource.c.filename.label("organization_logo_filename"),    # ADDED BLOCK END
+                    comment_logo_resource.c.directory.label(
+                        "organization_logo_directory"
+                    ),
+                    comment_logo_resource.c.filename.label(
+                        "organization_logo_filename"
+                    ),  # ADDED BLOCK END
                     # change 8 end
                 )
                 .select_from(
@@ -1178,7 +1177,8 @@ async def get_active_events_by_organizer(
                     )
                     .outerjoin(
                         comment_profile_resource,
-                        table["user"].c.profile_picture == comment_profile_resource.c.id,
+                        table["user"].c.profile_picture
+                        == comment_profile_resource.c.id,
                     )
                     .outerjoin(
                         table["organization"],
@@ -1213,7 +1213,7 @@ async def get_active_events_by_organizer(
                         "uuid": data["account_uuid"],
                         "email": data["account_email"],
                     },
-                    "role": role_name,                                           # ADDED: role field
+                    "role": role_name,  # ADDED: role field
                 }
 
                 if role_name == "organization":
@@ -1256,7 +1256,7 @@ async def get_active_events_by_organizer(
             event_data["pending_rsvps"] = pending_rsvps
             event_data["limited_comments"] = limited_comments
             # change #11 end
-            
+
             events.append(event_data)
 
         # change 12 (change return response to paginated structure)
@@ -1273,9 +1273,12 @@ async def get_active_events_by_organizer(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/organizer/past", tags=["Get Past Events by Organizer"])
 async def get_past_events_by_organizer(
-    account_uuid: str = Query(..., description="Account UUID of the organizer")
+    account_uuid: str = Query(..., description="Account UUID of the organizer"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(5, ge=1, le=100, description="Events per page"),
 ):
     session = db.session
     try:
@@ -1294,7 +1297,15 @@ async def get_past_events_by_organizer(
         if organization_id is None:
             raise HTTPException(status_code=404, detail="Organization not found")
 
-        # Get all past events for this organization (with joined RSVPs, address, resource)
+        # Pagination: get total count
+        total_count_stmt = select(func.count(table["event"].c.id)).where(
+            (table["event"].c.organization_id == organization_id)
+            & (table["event"].c.event_date < func.current_date())
+        )
+        total_count = session.execute(total_count_stmt).scalar() or 0
+        offset = (page - 1) * page_size
+
+        # Get paginated past events for this organization (with joined RSVPs, address, resource)
         select_events = (
             select(
                 table["event"].c.id,
@@ -1335,11 +1346,13 @@ async def get_past_events_by_organizer(
                 & (table["event"].c.event_date < func.current_date())
             )
             .order_by(table["event"].c.event_date.desc())
+            .limit(page_size)
+            .offset(offset)
         )
         events_result = session.execute(select_events).fetchall()
 
         # Group members by event
-        events_dict = {}
+        events_list = []
         for row in events_result:
             event_id = row._mapping["id"]
             event_data = dict(row._mapping)
@@ -1379,10 +1392,8 @@ async def get_past_events_by_organizer(
             event_data.pop("address_barangay_code", None)
             event_data["members"] = []
             event_data["pending_rsvps"] = []
-            events_dict[event_id] = event_data
 
-        # Fetch joined RSVPs for each event and add to members
-        for event_id in events_dict.keys():
+            # Fetch joined RSVPs for this event and add to members
             joined_stmt = (
                 select(
                     table["rsvp"].c.id.label("rsvp_id"),
@@ -1419,32 +1430,32 @@ async def get_past_events_by_organizer(
             )
             joined_result = session.execute(joined_stmt).fetchall()
             members = []
-            for row in joined_result:
+            for row_member in joined_result:
                 profile_picture = None
-                if row._mapping["profile_picture"]:
+                if row_member._mapping["profile_picture"]:
                     profile_picture = {
-                        "id": row._mapping["profile_picture"],
-                        "directory": row._mapping["profile_picture_directory"],
-                        "filename": row._mapping["profile_picture_filename"],
+                        "id": row_member._mapping["profile_picture"],
+                        "directory": row_member._mapping["profile_picture_directory"],
+                        "filename": row_member._mapping["profile_picture_filename"],
                     }
                 members.append(
                     {
-                        "rsvp_id": row._mapping["rsvp_id"],
-                        "rsvp_status": row._mapping["rsvp_status"],
+                        "rsvp_id": row_member._mapping["rsvp_id"],
+                        "rsvp_status": row_member._mapping["rsvp_status"],
                         "account": {
-                            "id": row._mapping["account_id"],
-                            "uuid": row._mapping["uuid"],
-                            "email": row._mapping["email"],
+                            "id": row_member._mapping["account_id"],
+                            "uuid": row_member._mapping["uuid"],
+                            "email": row_member._mapping["email"],
                         },
                         "user": {
-                            "first_name": row._mapping["first_name"],
-                            "last_name": row._mapping["last_name"],
-                            "bio": row._mapping["bio"],
+                            "first_name": row_member._mapping["first_name"],
+                            "last_name": row_member._mapping["last_name"],
+                            "bio": row_member._mapping["bio"],
                             "profile_picture": profile_picture,
                         },
                     }
                 )
-            events_dict[event_id]["members"] = members
+            event_data["members"] = members
 
             # Pending RSVPs
             pending_stmt = (
@@ -1483,32 +1494,32 @@ async def get_past_events_by_organizer(
             )
             pending_result = session.execute(pending_stmt).fetchall()
             pending_rsvps = []
-            for row in pending_result:
+            for row_pending in pending_result:
                 profile_picture = None
-                if row._mapping["profile_picture"]:
+                if row_pending._mapping["profile_picture"]:
                     profile_picture = {
-                        "id": row._mapping["profile_picture"],
-                        "directory": row._mapping["profile_picture_directory"],
-                        "filename": row._mapping["profile_picture_filename"],
+                        "id": row_pending._mapping["profile_picture"],
+                        "directory": row_pending._mapping["profile_picture_directory"],
+                        "filename": row_pending._mapping["profile_picture_filename"],
                     }
                 pending_rsvps.append(
                     {
-                        "rsvp_id": row._mapping["rsvp_id"],
-                        "rsvp_status": row._mapping["rsvp_status"],
+                        "rsvp_id": row_pending._mapping["rsvp_id"],
+                        "rsvp_status": row_pending._mapping["rsvp_status"],
                         "account": {
-                            "id": row._mapping["account_id"],
-                            "uuid": row._mapping["uuid"],
-                            "email": row._mapping["email"],
+                            "id": row_pending._mapping["account_id"],
+                            "uuid": row_pending._mapping["uuid"],
+                            "email": row_pending._mapping["email"],
                         },
                         "user": {
-                            "first_name": row._mapping["first_name"],
-                            "last_name": row._mapping["last_name"],
-                            "bio": row._mapping["bio"],
+                            "first_name": row_pending._mapping["first_name"],
+                            "last_name": row_pending._mapping["last_name"],
+                            "bio": row_pending._mapping["bio"],
                             "profile_picture": profile_picture,
                         },
                     }
                 )
-            events_dict[event_id]["pending_rsvps"] = pending_rsvps
+            event_data["pending_rsvps"] = pending_rsvps
 
             # Limited comments: top 2 latest for this event
             comments_stmt = (
@@ -1546,37 +1557,48 @@ async def get_past_events_by_organizer(
             )
             comments_result = session.execute(comments_stmt).fetchall()
             limited_comments = []
-            for row in comments_result:
+            for row_comment in comments_result:
                 profile_picture = None
                 if (
-                    "profile_picture" in row._mapping
-                    and row._mapping["profile_picture"]
+                    "profile_picture" in row_comment._mapping
+                    and row_comment._mapping["profile_picture"]
                 ):
                     profile_picture = {
-                        "id": row._mapping["profile_picture"],
-                        "directory": row._mapping.get("profile_picture_directory"),
-                        "filename": row._mapping.get("profile_picture_filename"),
+                        "id": row_comment._mapping["profile_picture"],
+                        "directory": row_comment._mapping.get(
+                            "profile_picture_directory"
+                        ),
+                        "filename": row_comment._mapping.get(
+                            "profile_picture_filename"
+                        ),
                     }
                 limited_comments.append(
                     {
-                        "comment_id": row._mapping["comment_id"],
-                        "message": row._mapping["message"],
-                        "created_date": row._mapping["created_date"],
+                        "comment_id": row_comment._mapping["comment_id"],
+                        "message": row_comment._mapping["message"],
+                        "created_date": row_comment._mapping["created_date"],
                         "account": {
-                            "id": row._mapping["account_id"],
-                            "uuid": row._mapping["uuid"],
-                            "email": row._mapping["email"],
+                            "id": row_comment._mapping["account_id"],
+                            "uuid": row_comment._mapping["uuid"],
+                            "email": row_comment._mapping["email"],
                         },
                         "user": {
-                            "first_name": row._mapping["first_name"],
-                            "last_name": row._mapping["last_name"],
+                            "first_name": row_comment._mapping["first_name"],
+                            "last_name": row_comment._mapping["last_name"],
                             "profile_picture": profile_picture,
                         },
                     }
                 )
-            events_dict[event_id]["limited_comments"] = limited_comments
+            event_data["limited_comments"] = limited_comments
 
-        return {"past_events": list(events_dict.values())}
+            events_list.append(event_data)
+
+        return {
+            "page": page,
+            "page_size": page_size,
+            "past_events": events_list,
+            "total": total_count,
+        }
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
     except Exception as e:
