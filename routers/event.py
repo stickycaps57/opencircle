@@ -2680,8 +2680,12 @@ async def get_user_events_by_rsvp_status_with_comments(
             event.pop("logo_directory", None)
             event.pop("logo_filename", None)
 
-            # For each event, fetch latest 3 comments (with user profile_picture joined to resource)
+            # For each event, fetch latest 3 comments (with correct commenter details)
             event_id = event["id"]
+            comment_profile_resource = table["resource"].alias(
+                "comment_profile_resource"
+            )
+            comment_logo_resource = table["resource"].alias("comment_logo_resource")
             comments_stmt = (
                 select(
                     table["comment"].c.id.label("comment_id"),
@@ -2690,11 +2694,29 @@ async def get_user_events_by_rsvp_status_with_comments(
                     table["account"].c.id.label("account_id"),
                     table["account"].c.uuid,
                     table["account"].c.email,
-                    table["user"].c.first_name,
-                    table["user"].c.last_name,
-                    table["user"].c.profile_picture,
-                    table["resource"].c.directory.label("profile_picture_directory"),
-                    table["resource"].c.filename.label("profile_picture_filename"),
+                    table["role"].c.name.label("role_name"),
+                    # User fields
+                    table["user"].c.first_name.label("user_first_name"),
+                    table["user"].c.last_name.label("user_last_name"),
+                    table["user"].c.profile_picture.label("profile_picture_id"),
+                    comment_profile_resource.c.directory.label(
+                        "profile_picture_directory"
+                    ),
+                    comment_profile_resource.c.filename.label(
+                        "profile_picture_filename"
+                    ),
+                    # Organization fields
+                    table["organization"].c.name.label("organization_name"),
+                    table["organization"].c.description.label(
+                        "organization_description"
+                    ),
+                    table["organization"].c.logo.label("organization_logo_id"),
+                    comment_logo_resource.c.directory.label(
+                        "organization_logo_directory"
+                    ),
+                    comment_logo_resource.c.filename.label(
+                        "organization_logo_filename"
+                    ),
                 )
                 .select_from(
                     table["comment"]
@@ -2702,13 +2724,26 @@ async def get_user_events_by_rsvp_status_with_comments(
                         table["account"],
                         table["comment"].c.author == table["account"].c.id,
                     )
+                    .join(
+                        table["role"],
+                        table["account"].c.role_id == table["role"].c.id,
+                    )
                     .outerjoin(
                         table["user"],
                         table["user"].c.account_id == table["account"].c.id,
                     )
                     .outerjoin(
-                        table["resource"],
-                        table["user"].c.profile_picture == table["resource"].c.id,
+                        comment_profile_resource,
+                        table["user"].c.profile_picture
+                        == comment_profile_resource.c.id,
+                    )
+                    .outerjoin(
+                        table["organization"],
+                        table["organization"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        comment_logo_resource,
+                        table["organization"].c.logo == comment_logo_resource.c.id,
                     )
                 )
                 .where(table["comment"].c.event_id == event_id)
@@ -2718,30 +2753,48 @@ async def get_user_events_by_rsvp_status_with_comments(
             comments_result = session.execute(comments_stmt).fetchall()
             latest_comments = []
             for row in comments_result:
-                profile_picture = None
-                if row._mapping.get("profile_picture"):
-                    profile_picture = {
-                        "id": row._mapping["profile_picture"],
-                        "directory": row._mapping.get("profile_picture_directory"),
-                        "filename": row._mapping.get("profile_picture_filename"),
+                data = row._mapping
+                role_name = data.get("role_name")
+                comment_obj = {
+                    "comment_id": data["comment_id"],
+                    "message": data["message"],
+                    "created_date": data["created_date"],
+                    "account": {
+                        "id": data["account_id"],
+                        "uuid": data["uuid"],
+                        "email": data["email"],
+                    },
+                    "role": role_name,
+                }
+                if role_name == "organization":
+                    comment_obj["organization"] = {
+                        "name": data["organization_name"],
+                        "description": data["organization_description"],
+                        "logo": (
+                            {
+                                "id": data["organization_logo_id"],
+                                "directory": data["organization_logo_directory"],
+                                "filename": data["organization_logo_filename"],
+                            }
+                            if data["organization_logo_id"]
+                            else None
+                        ),
                     }
-                latest_comments.append(
-                    {
-                        "comment_id": row._mapping["comment_id"],
-                        "message": row._mapping["message"],
-                        "created_date": row._mapping["created_date"],
-                        "account": {
-                            "id": row._mapping["account_id"],
-                            "uuid": row._mapping["uuid"],
-                            "email": row._mapping["email"],
-                        },
-                        "user": {
-                            "first_name": row._mapping["first_name"],
-                            "last_name": row._mapping["last_name"],
-                            "profile_picture": profile_picture,
-                        },
+                else:
+                    comment_obj["user"] = {
+                        "first_name": data["user_first_name"],
+                        "last_name": data["user_last_name"],
+                        "profile_picture": (
+                            {
+                                "id": data["profile_picture_id"],
+                                "directory": data["profile_picture_directory"],
+                                "filename": data["profile_picture_filename"],
+                            }
+                            if data["profile_picture_id"]
+                            else None
+                        ),
                     }
-                )
+                latest_comments.append(comment_obj)
             event["latest_comments"] = latest_comments
 
             events.append(event)
