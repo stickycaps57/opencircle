@@ -422,14 +422,14 @@ async def get_posts_with_comments(
         offset = (page - 1) * page_size
 
         # Get total count of posts for this account
-        total_count_stmt = (
-            select(func.count(table["post"].c.id))
-            .where(table["post"].c.author == account_id)
+        total_count_stmt = select(func.count(table["post"].c.id)).where(
+            table["post"].c.author == account_id
         )
         total_count = session.execute(total_count_stmt).scalar() or 0
 
         # Alias for profile picture resource
         profile_resource = table["resource"].alias("profile_resource")
+        org_logo_resource = table["resource"].alias("org_logo_resource")
 
         # Fetch posts with resource details, join author to account and user, join user.profile_picture to resource
         post_stmt = (
@@ -484,14 +484,12 @@ async def get_posts_with_comments(
             post_id = post_dict["id"]
 
             # Fetch total comments for this post
-            comment_count_stmt = (
-                select(func.count(table["comment"].c.id))
-                .where(table["comment"].c.post_id == post_id)
+            comment_count_stmt = select(func.count(table["comment"].c.id)).where(
+                table["comment"].c.post_id == post_id
             )
             total_comments = session.execute(comment_count_stmt).scalar() or 0
 
-
-            # Fetch top 3 latest comments for this post, joined with user details and profile picture resource
+            # Fetch top 3 latest comments for this post, joined with user/org details and profile picture/logo resource
             comment_resource = table["resource"].alias("comment_resource")
             comment_stmt = (
                 select(
@@ -501,6 +499,8 @@ async def get_posts_with_comments(
                     table["account"].c.id.label("account_id"),
                     table["account"].c.uuid,
                     table["account"].c.email,
+                    table["account"].c.role_id,
+                    table["role"].c.name.label("role_name"),
                     table["user"].c.first_name,
                     table["user"].c.last_name,
                     table["user"].c.bio,
@@ -508,12 +508,24 @@ async def get_posts_with_comments(
                     comment_resource.c.directory.label("profile_picture_directory"),
                     comment_resource.c.filename.label("profile_picture_filename"),
                     comment_resource.c.id.label("profile_picture_id"),
+                    table["organization"].c.name.label("organization_name"),
+                    table["organization"].c.description.label(
+                        "organization_description"
+                    ),
+                    table["organization"].c.logo.label("organization_logo"),
+                    org_logo_resource.c.directory.label("organization_logo_directory"),
+                    org_logo_resource.c.filename.label("organization_logo_filename"),
+                    org_logo_resource.c.id.label("organization_logo_id"),
                 )
                 .select_from(
                     table["comment"]
                     .join(
                         table["account"],
                         table["comment"].c.author == table["account"].c.id,
+                    )
+                    .join(
+                        table["role"],
+                        table["account"].c.role_id == table["role"].c.id,
                     )
                     .outerjoin(
                         table["user"],
@@ -522,6 +534,14 @@ async def get_posts_with_comments(
                     .outerjoin(
                         comment_resource,
                         table["user"].c.profile_picture == comment_resource.c.id,
+                    )
+                    .outerjoin(
+                        table["organization"],
+                        table["organization"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        org_logo_resource,
+                        table["organization"].c.logo == org_logo_resource.c.id,
                     )
                 )
                 .where(table["comment"].c.post_id == post_id)
@@ -533,32 +553,61 @@ async def get_posts_with_comments(
             comments = []
             for comment in comments_result:
                 data = comment._mapping
-                comments.append(
-                    {
-                        "comment_id": data["comment_id"],
-                        "message": data["message"],
-                        "created_date": data["created_date"],
-                        "account": {
-                            "id": data["account_id"],
-                            "uuid": data["uuid"],
-                            "email": data["email"],
-                        },
-                        "user": {
-                            "first_name": data["first_name"],
-                            "last_name": data["last_name"],
-                            "bio": data["bio"],
-                            "profile_picture": (
-                                {
-                                    "id": data["profile_picture_id"],
-                                    "directory": data["profile_picture_directory"],
-                                    "filename": data["profile_picture_filename"],
-                                }
-                                if data["profile_picture_id"]
-                                else None
-                            ),
-                        },
-                    }
-                )
+                if data["role_name"] == "organization":
+                    comments.append(
+                        {
+                            "comment_id": data["comment_id"],
+                            "message": data["message"],
+                            "created_date": data["created_date"],
+                            "account": {
+                                "id": data["account_id"],
+                                "uuid": data["uuid"],
+                                "email": data["email"],
+                            },
+                            "organization": {
+                                "name": data["organization_name"],
+                                "description": data["organization_description"],
+                                "logo": (
+                                    {
+                                        "id": data["organization_logo_id"],
+                                        "directory": data[
+                                            "organization_logo_directory"
+                                        ],
+                                        "filename": data["organization_logo_filename"],
+                                    }
+                                    if data["organization_logo_id"]
+                                    else None
+                                ),
+                            },
+                        }
+                    )
+                else:
+                    comments.append(
+                        {
+                            "comment_id": data["comment_id"],
+                            "message": data["message"],
+                            "created_date": data["created_date"],
+                            "account": {
+                                "id": data["account_id"],
+                                "uuid": data["uuid"],
+                                "email": data["email"],
+                            },
+                            "user": {
+                                "first_name": data["first_name"],
+                                "last_name": data["last_name"],
+                                "bio": data["bio"],
+                                "profile_picture": (
+                                    {
+                                        "id": data["profile_picture_id"],
+                                        "directory": data["profile_picture_directory"],
+                                        "filename": data["profile_picture_filename"],
+                                    }
+                                    if data["profile_picture_id"]
+                                    else None
+                                ),
+                            },
+                        }
+                    )
 
             post_dict["total_comments"] = total_comments
             post_dict["comments"] = comments
@@ -609,7 +658,6 @@ async def get_posts_with_comments(
             "page": page,
             "page_size": page_size,
             "posts": posts,
-            # "count": len(posts),
             "total": total_count,
         }
     except SQLAlchemyError as e:
