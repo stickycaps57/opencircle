@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Form
 from lib.database import Database
-from sqlalchemy import insert, update, delete
+from sqlalchemy import insert, update, delete, func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
@@ -12,7 +12,7 @@ router = APIRouter(
 
 db = Database()
 table = db.tables
-session = db.session
+# session = db.session
 
 
 @router.post("/post", tags=["Add Comment to Post"])
@@ -21,6 +21,7 @@ async def add_comment_to_post(
     message: str = Form(...),
     session_token: str = Cookie(...),
 ):
+    session = db.session
     # Get account_uuid from session_token
     account_uuid = get_account_uuid_from_session(session_token)
     if not account_uuid:
@@ -58,6 +59,7 @@ async def add_comment_to_event(
     message: str = Form(...),
     session_token: str = Cookie(...),
 ):
+    session = db.session
     # Get account_uuid from session_token
     account_uuid = get_account_uuid_from_session(session_token)
     if not account_uuid:
@@ -95,6 +97,7 @@ async def update_comment(
     message: str = Form(...),
     session_token: str = Cookie(...),
 ):
+    session = db.session
     # Get account_uuid from session_token
     account_uuid = get_account_uuid_from_session(session_token)
     if not account_uuid:
@@ -136,6 +139,7 @@ async def delete_comment(
     comment_id: int,
     session_token: str = Cookie(...),
 ):
+    session = db.session
     # Get account_uuid from session_token
     account_uuid = get_account_uuid_from_session(session_token)
     if not account_uuid:
@@ -173,6 +177,7 @@ async def delete_comment(
 
 @router.get("/event/{event_id}", tags=["Get Comments for Event"])
 async def get_comments_for_event(event_id: int, limit: int = 10, offset: int = 0):
+    session = db.session
     try:
         org_logo = table["resource"].alias("org_logo")
         # Join role table to get role name
@@ -280,6 +285,7 @@ async def get_comments_for_event(event_id: int, limit: int = 10, offset: int = 0
 
 @router.get("/post/{post_id}", tags=["Get Comments for Post"])
 async def get_comments_for_post(post_id: int, limit: int = 10, offset: int = 0):
+    session = db.session
     try:
         org_logo = table["resource"].alias("org_logo")
         query = (
