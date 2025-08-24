@@ -542,3 +542,56 @@ async def get_organization_members(organization_id: int):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+
+@router.post("/membership-status", tags=["Get Membership Status"])
+async def get_membership_status(
+    account_uuids: list[str] = Form(...), organization_id: int = Form(...)
+):
+    try:
+        # Get user_ids for the provided account_uuids
+        users = (
+            session.query(table["user"].c.id, table["account"].c.uuid)
+            .join(table["account"], table["user"].c.account_id == table["account"].c.id)
+            .filter(table["account"].c.uuid.in_(account_uuids))
+            .all()
+        )
+        if not users:
+            raise HTTPException(
+                status_code=404, detail="No users found for provided account_uuids"
+            )
+
+        user_id_map = {account_uuid: user_id for user_id, account_uuid in users}
+
+        # Get membership statuses for these users in the organization
+        memberships = (
+            session.query(table["membership"])
+            .filter(
+                table["membership"].c.organization_id == organization_id,
+                table["membership"].c.user_id.in_(user_id_map.values()),
+            )
+            .all()
+        )
+
+        status_map = {
+            membership.user_id: membership.status for membership in memberships
+        }
+
+        result = []
+        for account_uuid, user_id in user_id_map.items():
+            result.append(
+                {
+                    "account_uuid": account_uuid,
+                    "membership_status": status_map.get(user_id, None),
+                }
+            )
+
+        return {"membership_statuses": result}
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
