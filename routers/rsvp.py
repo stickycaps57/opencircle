@@ -324,3 +324,53 @@ async def delete_rsvp(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+
+@router.post("/statuses", tags=["Get RSVP Statuses for Accounts"])
+async def get_rsvp_statuses_for_accounts(
+    event_id: int = Form(...),
+    account_uuids: list[str] = Form(...),
+):
+    try:
+        # Get account IDs from UUIDs
+        accounts = (
+            session.query(table["account"].c.id, table["account"].c.uuid)
+            .filter(table["account"].c.uuid.in_(account_uuids))
+            .all()
+        )
+        uuid_to_id = {row._mapping["uuid"]: row._mapping["id"] for row in accounts}
+        if not uuid_to_id:
+            raise HTTPException(
+                status_code=404, detail="No accounts found for given UUIDs"
+            )
+
+        # Query RSVP statuses for these accounts and event
+        rsvps = (
+            session.query(
+                table["rsvp"].c.attendee,
+                table["rsvp"].c.status,
+                table["account"].c.uuid,
+            )
+            .join(table["account"], table["rsvp"].c.attendee == table["account"].c.id)
+            .filter(
+                table["rsvp"].c.event_id == event_id,
+                table["account"].c.uuid.in_(account_uuids),
+            )
+            .all()
+        )
+
+        # Map results by account_uuid
+        status_map = {row._mapping["uuid"]: row._mapping["status"] for row in rsvps}
+
+        # Return status for each requested account_uuid (None if not found)
+        result = [
+            {"account_uuid": uuid, "status": status_map.get(uuid)}
+            for uuid in account_uuids
+        ]
+        return {"event_id": event_id, "statuses": result}
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
