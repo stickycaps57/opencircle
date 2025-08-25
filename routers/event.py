@@ -2087,8 +2087,9 @@ async def get_all_events_with_comments(
         count_stmt = select(func.count()).select_from(table["event"])
         total_events = session.execute(count_stmt).scalar()
 
-        # If session_token is provided, get account_id
+        # If session_token is provided, get account_id and user_id
         account_id = None
+        user_id = None
         if session_token:
             try:
                 account_uuid = get_account_uuid_from_session(session_token)
@@ -2096,13 +2097,17 @@ async def get_all_events_with_comments(
                     table["account"].c.uuid == account_uuid
                 )
                 account_id = session.execute(select_account).scalar()
+                # Get user_id for membership check
+                select_user = select(table["user"].c.id).where(
+                    table["user"].c.account_id == account_id
+                )
+                user_id = session.execute(select_user).scalar()
             except Exception:
                 account_id = None
+                user_id = None
 
-        # Create an alias for the resource table for organization logo
         logo_resource = table["resource"].alias("logo_resource")
 
-        # Select events ordered by created_date and join organization, resource (image), address, and logo_resource tables
         events_stmt = (
             select(
                 table["event"],
@@ -2153,6 +2158,7 @@ async def get_all_events_with_comments(
         events = []
         for row in events_result:
             event_data = dict(row._mapping)
+            org_id = event_data.get("org_id")
             # Group organization details, including logo resource info
             event_data["organization"] = {
                 "id": event_data.pop("org_id"),
@@ -2171,7 +2177,6 @@ async def get_all_events_with_comments(
             event_data.pop("org_logo", None)
             event_data.pop("logo_directory", None)
             event_data.pop("logo_filename", None)
-            # Group image details
             event_data["image"] = (
                 {
                     "id": event_data.get("image"),
@@ -2183,7 +2188,6 @@ async def get_all_events_with_comments(
             )
             event_data.pop("image_directory", None)
             event_data.pop("image_filename", None)
-            # Group address details (now with 4 new fields)
             event_data["address"] = {
                 "id": event_data.get("address_id"),
                 "country": event_data.get("address_country"),
@@ -2208,6 +2212,16 @@ async def get_all_events_with_comments(
             event_data.pop("address_city_code", None)
             event_data.pop("address_barangay_code", None)
 
+            # Membership check: Get authenticated user's membership status in this event's organization
+            membership_status = None
+            if user_id and org_id:
+                membership_stmt = select(table["membership"].c.status).where(
+                    (table["membership"].c.organization_id == org_id)
+                    & (table["membership"].c.user_id == user_id)
+                )
+                membership_status = session.execute(membership_stmt).scalar()
+            event_data["user_membership_status_with_organizer"] = membership_status
+
             # If authenticated user, fetch RSVP status for this event
             if account_id:
                 rsvp_stmt = select(table["rsvp"].c.id, table["rsvp"].c.status).where(
@@ -2228,7 +2242,6 @@ async def get_all_events_with_comments(
         # For each event, get top 3 latest comments (including organization details if commenter is org)
         for event in events:
             event_id = event["id"]
-            # Aliases for resource table for org logo and user profile picture
             comment_profile_resource = table["resource"].alias(
                 "comment_profile_resource"
             )
@@ -2357,6 +2370,8 @@ async def get_all_events_with_comments(
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
 
 
 @router.get("/user/rsvped", tags=["Get User RSVPed Events By Month and Year"])
