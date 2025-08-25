@@ -1157,7 +1157,7 @@ async def get_active_events_by_organizer(
                     ),
                     comment_logo_resource.c.filename.label(
                         "organization_logo_filename"
-                    ),  # ADDED BLOCK END
+                    ),
                     # change 8 end
                 )
                 .select_from(
@@ -1305,6 +1305,8 @@ async def get_past_events_by_organizer(
         total_count = session.execute(total_count_stmt).scalar() or 0
         offset = (page - 1) * page_size
 
+        organization_resource = table["resource"].alias("organization_resource")
+
         # Get paginated past events for this organization (with joined RSVPs, address, resource)
         select_events = (
             select(
@@ -1317,6 +1319,10 @@ async def get_past_events_by_organizer(
                 table["event"].c.image,
                 table["event"].c.created_date,
                 table["event"].c.last_modified_date,
+                table["organization"].c.name.label("organization_name"),
+                table["organization"].c.logo.label("organization_logo_id"),
+                organization_resource.c.directory.label("organization_logo_directory"),
+                organization_resource.c.filename.label("organization_logo_filename"),
                 table["resource"].c.directory.label("image_directory"),
                 table["resource"].c.filename.label("image_filename"),
                 table["address"].c.country.label("address_country"),
@@ -1333,6 +1339,14 @@ async def get_past_events_by_organizer(
             )
             .select_from(
                 table["event"]
+                .outerjoin(
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
+                )
+                .outerjoin(
+                    organization_resource,
+                    table["organization"].c.logo == organization_resource.c.id,
+                )
                 .outerjoin(
                     table["resource"], table["event"].c.image == table["resource"].c.id
                 )
@@ -1392,6 +1406,35 @@ async def get_past_events_by_organizer(
             event_data.pop("address_barangay_code", None)
             event_data["members"] = []
             event_data["pending_rsvps"] = []
+
+            event_data["organization"] = {
+                "id": event_data["organization_id"],
+                "name": event_data["organization_name"],
+                "logo": (
+                    {
+                        "id": event_data["organization_logo_id"],
+                        "directory": event_data["organization_logo_directory"],
+                        "filename": event_data["organization_logo_filename"],
+                    }
+                    if event_data["organization_logo_id"]
+                    else None
+                ),
+            }
+
+            event_data.pop("organization_account_uuid", None)
+            event_data.pop("organization_account_email", None)
+            event_data.pop("organization_name", None)
+            event_data.pop("organization_description", None)
+            event_data.pop("organization_category", None)
+            event_data.pop("organization_logo_id", None)
+            event_data.pop("organization_logo_directory", None)
+            event_data.pop("organization_logo_filename", None)
+
+            members_count_stmt = select(func.count(table["rsvp"].c.id)).where(
+                (table["rsvp"].c.event_id == event_id)
+                & (table["rsvp"].c.status == "joined")
+            )
+            total_members = session.execute(members_count_stmt).scalar() or 0
 
             # Fetch joined RSVPs for this event and add to members
             joined_stmt = (
@@ -1455,7 +1498,6 @@ async def get_past_events_by_organizer(
                         },
                     }
                 )
-            event_data["members"] = members
 
             # Pending RSVPs
             pending_stmt = (
@@ -1519,9 +1561,88 @@ async def get_past_events_by_organizer(
                         },
                     }
                 )
-            event_data["pending_rsvps"] = pending_rsvps
+
+            comment_profile_resource = table["resource"].alias(
+                "comment_profile_resource"
+            )
+            comment_logo_resource = table["resource"].alias("comment_logo_resource")
+
+            comment_count_stmt = select(func.count(table["comment"].c.id)).where(
+                table["comment"].c.event_id == event_id
+            )
+            total_comments = session.execute(comment_count_stmt).scalar() or 0
 
             # Limited comments: top 2 latest for this event
+            # comments_stmt = (
+            #     select(
+            #         table["comment"].c.id.label("comment_id"),
+            #         table["comment"].c.message,
+            #         table["comment"].c.created_date,
+            #         table["account"].c.id.label("account_id"),
+            #         table["account"].c.uuid,
+            #         table["account"].c.email,
+            #         table["user"].c.first_name,
+            #         table["user"].c.last_name,
+            #         table["user"].c.profile_picture,
+            #         table["resource"].c.directory.label("profile_picture_directory"),
+            #         table["resource"].c.filename.label("profile_picture_filename"),
+            #     )
+            #     .select_from(
+            #         table["comment"]
+            #         .join(
+            #             table["account"],
+            #             table["comment"].c.author == table["account"].c.id,
+            #         )
+            #         .outerjoin(
+            #             table["user"],
+            #             table["user"].c.account_id == table["account"].c.id,
+            #         )
+            #         .outerjoin(
+            #             table["resource"],
+            #             table["user"].c.profile_picture == table["resource"].c.id,
+            #         )
+            #     )
+            #     .where(table["comment"].c.event_id == event_id)
+            #     .order_by(table["comment"].c.created_date.desc())
+            #     .limit(2)
+            # )
+            
+            # comments_result = session.execute(comments_stmt).fetchall()
+            # limited_comments = []
+            # for row_comment in comments_result:
+            #     profile_picture = None
+            #     if (
+            #         "profile_picture" in row_comment._mapping
+            #         and row_comment._mapping["profile_picture"]
+            #     ):
+            #         profile_picture = {
+            #             "id": row_comment._mapping["profile_picture"],
+            #             "directory": row_comment._mapping.get(
+            #                 "profile_picture_directory"
+            #             ),
+            #             "filename": row_comment._mapping.get(
+            #                 "profile_picture_filename"
+            #             ),
+            #         }
+            #     limited_comments.append(
+            #         {
+            #             "comment_id": row_comment._mapping["comment_id"],
+            #             "message": row_comment._mapping["message"],
+            #             "created_date": row_comment._mapping["created_date"],
+            #             "account": {
+            #                 "id": row_comment._mapping["account_id"],
+            #                 "uuid": row_comment._mapping["uuid"],
+            #                 "email": row_comment._mapping["email"],
+            #             },
+            #             "user": {
+            #                 "first_name": row_comment._mapping["first_name"],
+            #                 "last_name": row_comment._mapping["last_name"],
+            #                 "profile_picture": profile_picture,
+            #             },
+            #         }
+            #     )
+            # event_data["limited_comments"] = limited_comments
+
             comments_stmt = (
                 select(
                     table["comment"].c.id.label("comment_id"),
@@ -1530,11 +1651,29 @@ async def get_past_events_by_organizer(
                     table["account"].c.id.label("account_id"),
                     table["account"].c.uuid,
                     table["account"].c.email,
-                    table["user"].c.first_name,
-                    table["user"].c.last_name,
-                    table["user"].c.profile_picture,
-                    table["resource"].c.directory.label("profile_picture_directory"),
-                    table["resource"].c.filename.label("profile_picture_filename"),
+                    table["role"].c.name.label("role_name"),
+                    # change 8 start (add member and organization fields)
+                    # Member fields
+                    table["user"].c.first_name.label("user_first_name"),
+                    table["user"].c.last_name.label("user_last_name"),
+                    table["user"].c.profile_picture.label("profile_picture_id"),
+                    comment_profile_resource.c.directory.label(
+                        "profile_picture_directory"
+                    ),
+                    comment_profile_resource.c.filename.label(
+                        "profile_picture_filename"
+                    ),
+                    # Organization fields
+                    table["organization"].c.name.label("organization_name"),
+                    table["organization"].c.category.label("organization_category"),
+                    table["organization"].c.logo.label("organization_logo_id"),
+                    comment_logo_resource.c.directory.label(
+                        "organization_logo_directory"
+                    ),
+                    comment_logo_resource.c.filename.label(
+                        "organization_logo_filename"
+                    ),
+                    # change 8 end
                 )
                 .select_from(
                     table["comment"]
@@ -1542,54 +1681,94 @@ async def get_past_events_by_organizer(
                         table["account"],
                         table["comment"].c.author == table["account"].c.id,
                     )
+                    # change 9 start (enhance query joins: added role and organization tables with resource aliases)
+                    .join(
+                        table["role"],
+                        table["account"].c.role_id == table["role"].c.id,
+                    )
                     .outerjoin(
                         table["user"],
                         table["user"].c.account_id == table["account"].c.id,
                     )
                     .outerjoin(
-                        table["resource"],
-                        table["user"].c.profile_picture == table["resource"].c.id,
+                        comment_profile_resource,
+                        table["user"].c.profile_picture
+                        == comment_profile_resource.c.id,
                     )
+                    .outerjoin(
+                        table["organization"],
+                        table["organization"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        comment_logo_resource,
+                        table["organization"].c.logo == comment_logo_resource.c.id,
+                    )
+                    # change 9 end
                 )
                 .where(table["comment"].c.event_id == event_id)
                 .order_by(table["comment"].c.created_date.desc())
-                .limit(2)
+                .limit(3)
             )
+
             comments_result = session.execute(comments_stmt).fetchall()
             limited_comments = []
             for row_comment in comments_result:
-                profile_picture = None
-                if (
-                    "profile_picture" in row_comment._mapping
-                    and row_comment._mapping["profile_picture"]
-                ):
-                    profile_picture = {
-                        "id": row_comment._mapping["profile_picture"],
-                        "directory": row_comment._mapping.get(
-                            "profile_picture_directory"
-                        ),
-                        "filename": row_comment._mapping.get(
-                            "profile_picture_filename"
+                # change 10 start (process comments with conditional organization vs user profile based on role)
+                data = row_comment._mapping
+                role_name = data.get("role_name")
+                print("role name:", role_name)
+
+                # Build the comment object based on role                        # ADDED: base comment structure
+                comment_obj = {
+                    "comment_id": data["comment_id"],
+                    "message": data["message"],
+                    "created_date": data["created_date"],
+                    "account": {
+                        "id": data["account_id"],
+                        "uuid": data["account_uuid"],
+                        "email": data["account_email"],
+                    },
+                    "role": role_name,  # ADDED: role field
+                }
+
+                if role_name == "organization":
+                    comment_obj["organization"] = {
+                        "name": data["organization_name"],
+                        "category": data["organization_category"],
+                        "logo": (
+                            {
+                                "id": data["organization_logo_id"],
+                                "directory": data["organization_logo_directory"],
+                                "filename": data["organization_logo_filename"],
+                            }
+                            if data["organization_logo_id"]
+                            else None
                         ),
                     }
-                limited_comments.append(
-                    {
-                        "comment_id": row_comment._mapping["comment_id"],
-                        "message": row_comment._mapping["message"],
-                        "created_date": row_comment._mapping["created_date"],
-                        "account": {
-                            "id": row_comment._mapping["account_id"],
-                            "uuid": row_comment._mapping["uuid"],
-                            "email": row_comment._mapping["email"],
-                        },
-                        "user": {
-                            "first_name": row_comment._mapping["first_name"],
-                            "last_name": row_comment._mapping["last_name"],
-                            "profile_picture": profile_picture,
-                        },
+                else:
+                    comment_obj["user"] = {
+                        "first_name": data["user_first_name"],
+                        "last_name": data["user_last_name"],
+                        "profile_picture": (
+                            {
+                                "id": data["profile_picture_id"],
+                                "directory": data["profile_picture_directory"],
+                                "filename": data["profile_picture_filename"],
+                            }
+                            if data["profile_picture_id"]
+                            else None
+                        ),
                     }
-                )
+
+                limited_comments.append(comment_obj)
+                # change 10 end
+
+            event_data["total_comments"] = total_comments
+            event_data["total_members"] = total_members
+            event_data["members"] = members
+            event_data["pending_rsvps"] = pending_rsvps
             event_data["limited_comments"] = limited_comments
+            
 
             events_list.append(event_data)
 
@@ -2580,10 +2759,7 @@ async def get_user_events_with_comments(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get(
-    "/user/events_by_rsvp_status_with_comments",
-    tags=["Get User Events By RSVP Status With Comments"],
-)
+@router.get("/user/events_by_rsvp_status_with_comments",tags=["Get User Events By RSVP Status With Comments"])
 async def get_user_events_by_rsvp_status_with_comments(
     account_uuid: str = Query(..., description="Account UUID of the user"),
     rsvp_status: str = Query(
@@ -2735,6 +2911,12 @@ async def get_user_events_by_rsvp_status_with_comments(
 
             # For each event, fetch latest 3 comments (with correct commenter details)
             event_id = event["id"]
+
+            comment_count_stmt = select(func.count(table["comment"].c.id)).where(
+                table["comment"].c.event_id == event_id
+            )
+            total_comments = session.execute(comment_count_stmt).scalar() or 0
+
             comment_profile_resource = table["resource"].alias(
                 "comment_profile_resource"
             )
@@ -2849,7 +3031,7 @@ async def get_user_events_by_rsvp_status_with_comments(
                     }
                 latest_comments.append(comment_obj)
             event["latest_comments"] = latest_comments
-
+            event["total_comments"] = total_comments
             events.append(event)
 
         return {
