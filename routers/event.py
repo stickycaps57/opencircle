@@ -1606,7 +1606,7 @@ async def get_past_events_by_organizer(
             #     .order_by(table["comment"].c.created_date.desc())
             #     .limit(2)
             # )
-            
+
             # comments_result = session.execute(comments_stmt).fetchall()
             # limited_comments = []
             # for row_comment in comments_result:
@@ -1768,7 +1768,6 @@ async def get_past_events_by_organizer(
             event_data["members"] = members
             event_data["pending_rsvps"] = pending_rsvps
             event_data["limited_comments"] = limited_comments
-            
 
             events_list.append(event_data)
 
@@ -2078,6 +2077,7 @@ async def get_events_by_status_with_comments(
 async def get_all_events_with_comments(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(5, ge=1, le=20, description="Events per page (max 20)"),
+    session_token: Optional[str] = Cookie(None, alias="session_token"),
 ):
     session = db.session
     try:
@@ -2086,6 +2086,18 @@ async def get_all_events_with_comments(
         # Get total count for pagination info (any status, any date)
         count_stmt = select(func.count()).select_from(table["event"])
         total_events = session.execute(count_stmt).scalar()
+
+        # If session_token is provided, get account_id
+        account_id = None
+        if session_token:
+            try:
+                account_uuid = get_account_uuid_from_session(session_token)
+                select_account = select(table["account"].c.id).where(
+                    table["account"].c.uuid == account_uuid
+                )
+                account_id = session.execute(select_account).scalar()
+            except Exception:
+                account_id = None
 
         # Create an alias for the resource table for organization logo
         logo_resource = table["resource"].alias("logo_resource")
@@ -2195,6 +2207,22 @@ async def get_all_events_with_comments(
             event_data.pop("address_province_code", None)
             event_data.pop("address_city_code", None)
             event_data.pop("address_barangay_code", None)
+
+            # If authenticated user, fetch RSVP status for this event
+            if account_id:
+                rsvp_stmt = select(table["rsvp"].c.id, table["rsvp"].c.status).where(
+                    (table["rsvp"].c.event_id == event_data["id"])
+                    & (table["rsvp"].c.attendee == account_id)
+                )
+                rsvp_result = session.execute(rsvp_stmt).fetchone()
+                if rsvp_result:
+                    event_data["user_rsvp"] = {
+                        "rsvp_id": rsvp_result.id,
+                        "status": rsvp_result.status,
+                    }
+                else:
+                    event_data["user_rsvp"] = None
+
             events.append(event_data)
 
         # For each event, get top 3 latest comments (including organization details if commenter is org)
@@ -2759,7 +2787,10 @@ async def get_user_events_with_comments(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/user/events_by_rsvp_status_with_comments",tags=["Get User Events By RSVP Status With Comments"])
+@router.get(
+    "/user/events_by_rsvp_status_with_comments",
+    tags=["Get User Events By RSVP Status With Comments"],
+)
 async def get_user_events_by_rsvp_status_with_comments(
     account_uuid: str = Query(..., description="Account UUID of the user"),
     rsvp_status: str = Query(
