@@ -194,14 +194,30 @@ async def get_user_memberships(account_uuid: str):
         )
         if not memberships:
             return {"organizations": organizations}
-            # raise HTTPException(status_code=404, detail="No memberships found for user")
 
-        
         for membership in memberships:
             org_id = membership.organization_id
-            org = session.query(table["organization"]).filter_by(id=org_id).first()
+            # Join organization to resource to get logo details
+            org_query = (
+                session.query(
+                    table["organization"].c.id,
+                    table["organization"].c.name,
+                    table["organization"].c.description,
+                    table["organization"].c.logo,
+                    table["resource"].c.directory.label("logo_directory"),
+                    table["resource"].c.filename.label("logo_filename"),
+                    table["resource"].c.id.label("logo_id"),
+                )
+                .outerjoin(
+                    table["resource"],
+                    table["organization"].c.logo == table["resource"].c.id,
+                )
+                .filter(table["organization"].c.id == org_id)
+            )
+            org = org_query.first()
             if not org:
                 continue
+
             # Get all members of this organization, join user and resource for profile picture
             org_memberships = (
                 session.query(
@@ -256,7 +272,17 @@ async def get_user_memberships(account_uuid: str):
             organizations.append(
                 {
                     "organization_id": org.id,
-                    "organization_name": getattr(org, "name", None),
+                    "organization_name": org.name,
+                    "organization_description": org.description,
+                    "organization_logo": (
+                        {
+                            "id": org.logo_id,
+                            "directory": org.logo_directory,
+                            "filename": org.logo_filename,
+                        }
+                        if org.logo_id
+                        else None
+                    ),
                     "membership_status": membership.status,
                     "members": members,
                 }
