@@ -184,6 +184,7 @@ async def get_user_memberships(account_uuid: str):
             raise HTTPException(status_code=404, detail="User not found")
 
         user_id = user.id
+        organizations = []
 
         # Get all organizations the user is a member of
         memberships = (
@@ -192,9 +193,10 @@ async def get_user_memberships(account_uuid: str):
             .all()
         )
         if not memberships:
-            raise HTTPException(status_code=404, detail="No memberships found for user")
+            return {"organizations": organizations}
+            # raise HTTPException(status_code=404, detail="No memberships found for user")
 
-        organizations = []
+        
         for membership in memberships:
             org_id = membership.organization_id
             org = session.query(table["organization"]).filter_by(id=org_id).first()
