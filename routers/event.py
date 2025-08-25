@@ -799,10 +799,9 @@ async def get_event_rsvps(
 @router.get("/organizer/active", tags=["Get Active Events by Organizer"])
 async def get_active_events_by_organizer(
     account_uuid: str = Query(..., description="Account UUID of the organizer"),
-    # changes #1 start (add pagination parameters)
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(5, ge=1, le=100, description="Events per page"),
-    # changes #2 end
+    session_token: Optional[str] = Cookie(None, alias="session_token"),
 ):
     session = db.session
     try:
@@ -821,33 +820,42 @@ async def get_active_events_by_organizer(
         if organization_id is None:
             raise HTTPException(status_code=404, detail="Organization not found")
 
-        # changes #2 start (to get offset and total count of active events)
-        # Calculate offset for pagination
         offset = (page - 1) * page_size
 
-        # Get total count of active events for this organization
         total_count_stmt = select(func.count(table["event"].c.id)).where(
             (table["event"].c.organization_id == organization_id)
             & (table["event"].c.event_date >= func.current_date())
         )
         total_count = session.execute(total_count_stmt).scalar() or 0
-        # changes #2 end
 
-        #  change #13.1 start (add alias for organization logo resource)
         organization_resource = table["resource"].alias("organization_resource")
-        #  change #13.1 end
 
-        # Get paginated active events for this organization (with joined RSVPs, address, resource)
+        # If session_token is provided, get account_id and user_id
+        account_id = None
+        user_id = None
+        if session_token:
+            try:
+                account_uuid_user = get_account_uuid_from_session(session_token)
+                select_account = select(table["account"].c.id).where(
+                    table["account"].c.uuid == account_uuid_user
+                )
+                account_id = session.execute(select_account).scalar()
+                select_user = select(table["user"].c.id).where(
+                    table["user"].c.account_id == account_id
+                )
+                user_id = session.execute(select_user).scalar()
+            except Exception:
+                account_id = None
+                user_id = None
+
         select_events = (
             select(
                 table["event"].c.id,
                 table["event"].c.organization_id,
-                # change #13.2 start (added organization fields)
                 table["organization"].c.name.label("organization_name"),
                 table["organization"].c.logo.label("organization_logo_id"),
                 organization_resource.c.directory.label("organization_logo_directory"),
                 organization_resource.c.filename.label("organization_logo_filename"),
-                # change #13.2 end
                 table["event"].c.title,
                 table["event"].c.event_date,
                 table["event"].c.address_id,
@@ -892,22 +900,16 @@ async def get_active_events_by_organizer(
                 & (table["event"].c.event_date >= func.current_date())
             )
             .order_by(table["event"].c.event_date.asc())
-            # changes #3 start (to add limit and offset to select query)
             .limit(page_size)
             .offset(offset)
-            # changes #3 end
         )
         events_result = session.execute(select_events).fetchall()
 
-        # changes #4 (dict-based result to list-based result)
-        # Process events
         events = []
         for row in events_result:
             event_data = dict(row._mapping)
             event_id = event_data["id"]
-            # changes #4 end
 
-            # Group image details
             event_data["image"] = (
                 {
                     "id": event_data["image"],
@@ -920,7 +922,6 @@ async def get_active_events_by_organizer(
             event_data.pop("image_directory", None)
             event_data.pop("image_filename", None)
 
-            # Group address details (including house_building_number and codes inside address)
             event_data["address"] = {
                 "id": event_data["address_id"],
                 "country": event_data["address_country"],
@@ -933,7 +934,6 @@ async def get_active_events_by_organizer(
                 "city_code": event_data["address_city_code"],
                 "barangay_code": event_data["address_barangay_code"],
             }
-
             event_data.pop("address_country", None)
             event_data.pop("address_province", None)
             event_data.pop("address_city", None)
@@ -944,7 +944,6 @@ async def get_active_events_by_organizer(
             event_data.pop("address_city_code", None)
             event_data.pop("address_barangay_code", None)
 
-            # change #13.3 start (group organization details)
             event_data["organization"] = {
                 "id": event_data["organization_id"],
                 "name": event_data["organization_name"],
@@ -958,7 +957,6 @@ async def get_active_events_by_organizer(
                     else None
                 ),
             }
-
             event_data.pop("organization_account_uuid", None)
             event_data.pop("organization_account_email", None)
             event_data.pop("organization_name", None)
@@ -967,23 +965,46 @@ async def get_active_events_by_organizer(
             event_data.pop("organization_logo_id", None)
             event_data.pop("organization_logo_directory", None)
             event_data.pop("organization_logo_filename", None)
-            # changes #13 end
 
-            # changes #5 start (total count of members for this event)
             members_count_stmt = select(func.count(table["rsvp"].c.id)).where(
                 (table["rsvp"].c.event_id == event_id)
                 & (table["rsvp"].c.status == "joined")
             )
             total_members = session.execute(members_count_stmt).scalar() or 0
-            # change #5 end
 
-            # change #6 start (total count of pending RSVPs for this event)
             pending_count_stmt = select(func.count(table["rsvp"].c.id)).where(
                 (table["rsvp"].c.event_id == event_id)
                 & (table["rsvp"].c.status == "pending")
             )
             total_pending_rsvps = session.execute(pending_count_stmt).scalar() or 0
-            # change #6 end
+
+            # Membership check: Get authenticated user's membership status in this event's organization
+            membership_status = None
+            if user_id and event_data["organization_id"]:
+                membership_stmt = select(table["membership"].c.status).where(
+                    (
+                        table["membership"].c.organization_id
+                        == event_data["organization_id"]
+                    )
+                    & (table["membership"].c.user_id == user_id)
+                )
+                membership_status = session.execute(membership_stmt).scalar()
+            event_data["user_membership_status_with_organizer"] = membership_status
+
+            # If authenticated user, fetch RSVP status for this event
+            if account_id:
+                rsvp_stmt = select(table["rsvp"].c.id, table["rsvp"].c.status).where(
+                    (table["rsvp"].c.event_id == event_id)
+                    & (table["rsvp"].c.attendee == account_id)
+                )
+                rsvp_result = session.execute(rsvp_stmt).fetchone()
+                if rsvp_result:
+                    event_data["user_rsvp"] = {
+                        "rsvp_id": rsvp_result.id,
+                        "status": rsvp_result.status,
+                    }
+                else:
+                    event_data["user_rsvp"] = None
 
             # Fetch joined RSVPs for this event (limit to recent 3)
             joined_stmt = (
@@ -1113,21 +1134,16 @@ async def get_active_events_by_organizer(
                     }
                 )
 
-            # change #7 (create separate aliases for resource)
             comment_profile_resource = table["resource"].alias(
                 "comment_profile_resource"
             )
             comment_logo_resource = table["resource"].alias("comment_logo_resource")
-            # change #7 end
 
-            # change #14 start (added total comments for this event)
             comment_count_stmt = select(func.count(table["comment"].c.id)).where(
                 table["comment"].c.event_id == event_id
             )
             total_comments = session.execute(comment_count_stmt).scalar() or 0
-            # change #15 end
 
-            # Limited comments: top 2 latest for this event
             comments_stmt = (
                 select(
                     table["comment"].c.id.label("comment_id"),
@@ -1137,8 +1153,6 @@ async def get_active_events_by_organizer(
                     table["account"].c.uuid,
                     table["account"].c.email,
                     table["role"].c.name.label("role_name"),
-                    # change 8 start (add member and organization fields)
-                    # Member fields
                     table["user"].c.first_name.label("user_first_name"),
                     table["user"].c.last_name.label("user_last_name"),
                     table["user"].c.profile_picture.label("profile_picture_id"),
@@ -1148,7 +1162,6 @@ async def get_active_events_by_organizer(
                     comment_profile_resource.c.filename.label(
                         "profile_picture_filename"
                     ),
-                    # Organization fields
                     table["organization"].c.name.label("organization_name"),
                     table["organization"].c.category.label("organization_category"),
                     table["organization"].c.logo.label("organization_logo_id"),
@@ -1158,7 +1171,6 @@ async def get_active_events_by_organizer(
                     comment_logo_resource.c.filename.label(
                         "organization_logo_filename"
                     ),
-                    # change 8 end
                 )
                 .select_from(
                     table["comment"]
@@ -1166,7 +1178,6 @@ async def get_active_events_by_organizer(
                         table["account"],
                         table["comment"].c.author == table["account"].c.id,
                     )
-                    # change 9 start (enhance query joins: added role and organization tables with resource aliases)
                     .join(
                         table["role"],
                         table["account"].c.role_id == table["role"].c.id,
@@ -1188,7 +1199,6 @@ async def get_active_events_by_organizer(
                         comment_logo_resource,
                         table["organization"].c.logo == comment_logo_resource.c.id,
                     )
-                    # change 9 end
                 )
                 .where(table["comment"].c.event_id == event_id)
                 .order_by(table["comment"].c.created_date.desc())
@@ -1198,12 +1208,8 @@ async def get_active_events_by_organizer(
             comments_result = session.execute(comments_stmt).fetchall()
             limited_comments = []
             for row_comment in comments_result:
-                # change 10 start (process comments with conditional organization vs user profile based on role)
                 data = row_comment._mapping
                 role_name = data.get("role_name")
-                print("role name:", role_name)
-
-                # Build the comment object based on role                        # ADDED: base comment structure
                 comment_obj = {
                     "comment_id": data["comment_id"],
                     "message": data["message"],
@@ -1213,9 +1219,8 @@ async def get_active_events_by_organizer(
                         "uuid": data["account_uuid"],
                         "email": data["account_email"],
                     },
-                    "role": role_name,  # ADDED: role field
+                    "role": role_name,
                 }
-
                 if role_name == "organization":
                     comment_obj["organization"] = {
                         "name": data["organization_name"],
@@ -1244,29 +1249,23 @@ async def get_active_events_by_organizer(
                             else None
                         ),
                     }
-
                 limited_comments.append(comment_obj)
-                # change 10 end
 
-            # change #11 (Add totals data of members and pending rsvp)
             event_data["total_comments"] = total_comments
             event_data["total_members"] = total_members
             event_data["total_pending_rsvps"] = total_pending_rsvps
             event_data["members"] = members
             event_data["pending_rsvps"] = pending_rsvps
             event_data["limited_comments"] = limited_comments
-            # change #11 end
 
             events.append(event_data)
 
-        # change 12 (change return response to paginated structure)
         return {
             "page": page,
             "page_size": page_size,
             "active_events": events,
             "total": total_count,
         }
-        # change 12 end
 
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
