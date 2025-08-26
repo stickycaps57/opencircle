@@ -12,7 +12,6 @@ router = APIRouter(
 
 db = Database()
 table = db.tables
-session = db.session
 
 
 @router.post("/join", tags=["Join Organization"])
@@ -20,6 +19,7 @@ async def join_organization(
     organization_id: int = Form(...),
     session_token: str = Cookie(None, alias="session_token"),
 ):
+    session = db.session
     # Validate session token
     if not session_token:
         raise HTTPException(status_code=401, detail="Session token missing")
@@ -43,19 +43,53 @@ async def join_organization(
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    # Insert membership (status defaults to 'pending')
-    stmt = insert(table["membership"]).values(
-        organization_id=organization_id, user_id=user_id, status="pending"
-    )
+    # Check if membership already exists
+    existing_membership = session.query(table["membership"]).filter_by(
+        organization_id=organization_id, user_id=user_id
+    ).first()
+    
+    if existing_membership:
+        # If membership exists but was rejected, update it to pending
+        if existing_membership.status == "rejected":
+            try:
+                update_stmt = update(table["membership"]).where(
+                    table["membership"].c.organization_id == organization_id,
+                    table["membership"].c.user_id == user_id
+                ).values(status="pending")
+                session.execute(update_stmt)
+                session.commit()
+                return {"message": "Membership request resubmitted"}
+            except SQLAlchemyError as e:
+                session.rollback()
+                raise HTTPException(status_code=500, detail="Database error: " + str(e))
+        else:
+            # If membership exists with status pending or approved, return error
+            raise HTTPException(
+                status_code=409, detail="Membership already exists or is pending"
+            )
+    
+    # Original implementation (commented out):
+    # stmt = insert(table["membership"]).values(
+    #     organization_id=organization_id, user_id=user_id, status="pending"
+    # )
+    # try:
+    #     session.execute(stmt)
+    #     session.commit()
+    #     return {"message": "Membership request submitted"}
+    # except IntegrityError:
+    #     session.rollback()
+    #     raise HTTPException(
+    #         status_code=409, detail="Membership already exists or is pending"
+    #     )
+    
+    # Insert new membership with pending status
     try:
+        stmt = insert(table["membership"]).values(
+            organization_id=organization_id, user_id=user_id, status="pending"
+        )
         session.execute(stmt)
         session.commit()
         return {"message": "Membership request submitted"}
-    except IntegrityError:
-        session.rollback()
-        raise HTTPException(
-            status_code=409, detail="Membership already exists or is pending"
-        )
     except SQLAlchemyError as e:
         session.rollback()
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
@@ -71,6 +105,7 @@ async def leave_organization(
     organization_id: int = Form(...),
     session_token: str = Cookie(None, alias="session_token"),
 ):
+    session = db.session
     # Validate session token
     if not session_token:
         raise HTTPException(status_code=401, detail="Session token missing")
@@ -125,6 +160,7 @@ async def change_membership_status(
     status: str = Form(...),
     session_token: str = Cookie(None, alias="session_token"),
 ):
+    session = db.session
     # Validate session token
     if not session_token:
         raise HTTPException(status_code=401, detail="Session token missing")
@@ -172,6 +208,7 @@ async def change_membership_status(
 
 @router.get("/memberships", tags=["Get User Memberships"])
 async def get_user_memberships(account_uuid: str):
+    session = db.session
     try:
         # Get user_id by joining user and account tables
         user = (
@@ -300,6 +337,7 @@ async def get_user_memberships(account_uuid: str):
 
 @router.get("/pending-membership", tags=["Get Pending Membership Organization"])
 async def get_pending_membership_organization(account_uuid: str):
+    session = db.session
     try:
         # Get user_id by joining user and account tables
         user = (
@@ -314,27 +352,72 @@ async def get_pending_membership_organization(account_uuid: str):
         user_id = user.id
 
         # Find pending membership
-        pending_membership = (
+        pending_memberships = (
             session.query(table["membership"])
             .filter_by(user_id=user_id, status="pending")
-            .first()
+            .all()
+            # .first()
         )
-        if not pending_membership:
-            raise HTTPException(status_code=404, detail="No pending membership found")
+        if not pending_memberships:
+            return {"pending_memberships": []}
+            # raise HTTPException(status_code=404, detail="No pending membership found")
 
-        org = (
-            session.query(table["organization"])
-            .filter_by(id=pending_membership.organization_id)
-            .first()
-        )
-        if not org:
-            raise HTTPException(status_code=404, detail="Organization not found")
+        # org = (
+        #     session.query(table["organization"])
+        #     .filter_by(id=pending_membership.organization_id)
+        #     .first()
+        # )
 
-        return {
-            "organization_id": org.id,
-            "organization_name": getattr(org, "name", None),
-            "membership_status": pending_membership.status,
-        }
+        pending_membership_list = []
+
+        for pending_membership in pending_memberships:
+            org = (
+                session.query(
+                    table["organization"].c.id,
+                    table["organization"].c.name,
+                    table["organization"].c.category,
+                    table["organization"].c.logo,
+                    table["resource"].c.directory.label("logo_directory"),
+                    table["resource"].c.filename.label("logo_filename"),
+                    table["resource"].c.id.label("logo_id"),
+                )
+                .outerjoin(
+                    table["resource"],
+                    table["organization"].c.logo == table["resource"].c.id,
+                )
+                .filter(table["organization"].c.id == pending_membership.organization_id)
+                .first()
+            )
+
+            if not org:
+                continue
+
+            pending_membership_list.append({
+                "organization_id": org.id,
+                "organization_name": org.name,
+                "organization_category": org.category,
+                "organization_logo": (
+                    {
+                        "id": org.logo_id,
+                        "directory": org.logo_directory,
+                        "filename": org.logo_filename,
+                    }
+                    if org.logo_id
+                    else None
+                ),
+                "membership_status": pending_membership.status,
+            })
+
+        # if not org:
+        #     raise HTTPException(status_code=404, detail="Organization not found")
+
+        # return {
+        #     "organization_id": org.id,
+        #     "organization_name": getattr(org, "name", None),
+        #     "membership_status": pending_membership.status,
+        # }
+
+        return {"pending_memberships": pending_membership_list}
     except SQLAlchemyError as e:
         session.rollback()
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
@@ -349,6 +432,7 @@ async def get_pending_membership_organization(account_uuid: str):
 async def get_pending_membership_applications(
     session_token: str = Cookie(None, alias="session_token"),
 ):
+    session = db.session
     # Validate session token
     if not session_token:
         raise HTTPException(status_code=401, detail="Session token missing")
@@ -425,6 +509,7 @@ async def get_pending_membership_applications(
 async def get_rejected_membership_applications(
     session_token: str = Cookie(None, alias="session_token"),
 ):
+    session = db.session
     # Validate session token
     if not session_token:
         raise HTTPException(status_code=401, detail="Session token missing")
@@ -499,6 +584,7 @@ async def get_rejected_membership_applications(
 
 @router.get("/organization-members", tags=["Get Organization Members"])
 async def get_organization_members(organization_id: int):
+    session = db.session
     try:
         # Check if organization exists
         org = session.query(table["organization"]).filter_by(id=organization_id).first()
@@ -576,6 +662,7 @@ async def get_organization_members(organization_id: int):
 async def get_membership_status(
     account_uuids: list[str] = Form(...), organization_id: int = Form(...)
 ):
+    session = db.session
     try:
         # Get user_ids for the provided account_uuids
         users = (
