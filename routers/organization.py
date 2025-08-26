@@ -4,6 +4,8 @@ from sqlalchemy import insert, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
+from sqlalchemy import or_
+from sqlalchemy.sql import func
 
 router = APIRouter(
     prefix="/organization",
@@ -738,6 +740,80 @@ async def get_membership_status(
             )
 
         return {"membership_statuses": result}
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.get("/search", tags=["Search Organizations"])
+async def search_organizations(query: str):
+    session = db.session
+    try:
+        organizations = (
+            session.query(
+                table["organization"].c.id,
+                table["organization"].c.name,
+                table["organization"].c.description,
+                table["organization"].c.category,
+                table["organization"].c.logo,
+                table["organization"].c.account_id,
+                table["account"].c.uuid.label("account_uuid"),
+                table["resource"].c.directory.label("logo_directory"),
+                table["resource"].c.filename.label("logo_filename"),
+                table["resource"].c.id.label("logo_id"),
+            )
+            .join(
+                table["account"],
+                table["organization"].c.account_id == table["account"].c.id,
+            )
+            .outerjoin(
+                table["resource"],
+                table["organization"].c.logo == table["resource"].c.id,
+            )
+            .filter(
+                or_(
+                    func.lower(table["organization"].c.name).ilike(
+                        f"%{query.lower()}%"
+                    ),
+                    func.lower(table["organization"].c.description).ilike(
+                        f"%{query.lower()}%"
+                    ),
+                    func.lower(table["organization"].c.category).ilike(
+                        f"%{query.lower()}%"
+                    ),
+                )
+            )
+            .order_by(func.lower(table["organization"].c.name))  # alphabetical order
+            .limit(20)
+            .all()
+        )
+
+        results = []
+        for org in organizations:
+            results.append(
+                {
+                    "organization_id": org.id,
+                    "account_uuid": org.account_uuid,
+                    "name": org.name,
+                    "description": org.description,
+                    "category": org.category,
+                    "logo": (
+                        {
+                            "id": org.logo_id,
+                            "directory": org.logo_directory,
+                            "filename": org.logo_filename,
+                        }
+                        if org.logo_id
+                        else None
+                    ),
+                }
+            )
+        return {"results": results}
     except SQLAlchemyError as e:
         session.rollback()
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
