@@ -2361,6 +2361,12 @@ async def get_user_rsvped_events_by_month_year(
         if account_id is None:
             raise HTTPException(status_code=404, detail="Account not found")
 
+        # Get user_id for membership check
+        select_user = select(table["user"].c.id).where(
+            table["user"].c.account_id == account_id
+        )
+        user_id = session.execute(select_user).scalar()
+
         # Helper for filtering by month/year
         def month_year_filter(col):
             return (
@@ -2487,6 +2493,143 @@ async def get_user_rsvped_events_by_month_year(
             )
             event_data.pop("image_directory", None)
             event_data.pop("image_filename", None)
+
+            # Membership status for this event's organization
+            membership_status = None
+            org_id = event_data.get("event_organization_id")
+            if user_id and org_id:
+                membership_stmt = select(table["membership"].c.status).where(
+                    (table["membership"].c.organization_id == org_id)
+                    & (table["membership"].c.user_id == user_id)
+                )
+                membership_status = session.execute(membership_stmt).scalar()
+            event_data["user_membership_status_with_organizer"] = membership_status
+
+            # Add top 3 latest comments and total count of comments for this event
+            event_id = event_data["event_id"]
+            comment_profile_resource = table["resource"].alias(
+                "comment_profile_resource"
+            )
+            comment_logo_resource = table["resource"].alias("comment_logo_resource")
+
+            # Total comments count
+            comment_count_stmt = select(func.count(table["comment"].c.id)).where(
+                table["comment"].c.event_id == event_id
+            )
+            total_comments = session.execute(comment_count_stmt).scalar() or 0
+
+            # Top 3 latest comments
+            comments_stmt = (
+                select(
+                    table["comment"].c.id.label("comment_id"),
+                    table["comment"].c.message,
+                    table["comment"].c.created_date,
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["role"].c.name.label("role_name"),
+                    # User fields
+                    table["user"].c.first_name.label("user_first_name"),
+                    table["user"].c.last_name.label("user_last_name"),
+                    table["user"].c.profile_picture.label("profile_picture_id"),
+                    comment_profile_resource.c.directory.label(
+                        "profile_picture_directory"
+                    ),
+                    comment_profile_resource.c.filename.label(
+                        "profile_picture_filename"
+                    ),
+                    # Organization fields
+                    table["organization"].c.name.label("organization_name"),
+                    table["organization"].c.description.label(
+                        "organization_description"
+                    ),
+                    table["organization"].c.logo.label("organization_logo_id"),
+                    comment_logo_resource.c.directory.label(
+                        "organization_logo_directory"
+                    ),
+                    comment_logo_resource.c.filename.label(
+                        "organization_logo_filename"
+                    ),
+                )
+                .select_from(
+                    table["comment"]
+                    .join(
+                        table["account"],
+                        table["comment"].c.author == table["account"].c.id,
+                    )
+                    .join(
+                        table["role"],
+                        table["account"].c.role_id == table["role"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        comment_profile_resource,
+                        table["user"].c.profile_picture
+                        == comment_profile_resource.c.id,
+                    )
+                    .outerjoin(
+                        table["organization"],
+                        table["organization"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        comment_logo_resource,
+                        table["organization"].c.logo == comment_logo_resource.c.id,
+                    )
+                )
+                .where(table["comment"].c.event_id == event_id)
+                .order_by(table["comment"].c.created_date.desc())
+                .limit(3)
+            )
+            comments_result = session.execute(comments_stmt).fetchall()
+            latest_comments = []
+            for row_comment in comments_result:
+                data = row_comment._mapping
+                role_name = data.get("role_name")
+                comment_obj = {
+                    "comment_id": data["comment_id"],
+                    "message": data["message"],
+                    "created_date": data["created_date"],
+                    "account": {
+                        "id": data["account_id"],
+                        "uuid": data["uuid"],
+                        "email": data["email"],
+                    },
+                    "role": role_name,
+                }
+                if role_name == "organization":
+                    comment_obj["organization"] = {
+                        "name": data["organization_name"],
+                        "description": data["organization_description"],
+                        "logo": (
+                            {
+                                "id": data["organization_logo_id"],
+                                "directory": data["organization_logo_directory"],
+                                "filename": data["organization_logo_filename"],
+                            }
+                            if data["organization_logo_id"]
+                            else None
+                        ),
+                    }
+                else:
+                    comment_obj["user"] = {
+                        "first_name": data["user_first_name"],
+                        "last_name": data["user_last_name"],
+                        "profile_picture": (
+                            {
+                                "id": data["profile_picture_id"],
+                                "directory": data["profile_picture_directory"],
+                                "filename": data["profile_picture_filename"],
+                            }
+                            if data["profile_picture_id"]
+                            else None
+                        ),
+                    }
+                latest_comments.append(comment_obj)
+            event_data["latest_comments"] = latest_comments
+            event_data["total_comments"] = total_comments
 
             events.append(event_data)
 
