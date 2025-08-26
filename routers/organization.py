@@ -241,7 +241,7 @@ async def get_user_memberships(account_uuid: str):
         for membership in memberships:
             org_id = membership.organization_id
             # Join organization to resource to get logo details
-            org_query = (
+            org = (
                 session.query(
                     table["organization"].c.id,
                     table["organization"].c.name,
@@ -256,8 +256,8 @@ async def get_user_memberships(account_uuid: str):
                     table["organization"].c.logo == table["resource"].c.id,
                 )
                 .filter(table["organization"].c.id == org_id)
+                .first()
             )
-            org = org_query.first()
             if not org:
                 continue
 
@@ -312,20 +312,22 @@ async def get_user_memberships(account_uuid: str):
                         ),
                     }
                 )
+            # Fetch logo details for the organization
+            organization_logo = (
+                {
+                    "id": org.logo_id,
+                    "directory": org.logo_directory,
+                    "filename": org.logo_filename,
+                }
+                if org.logo_id
+                else None
+            )
             organizations.append(
                 {
                     "organization_id": org.id,
                     "organization_name": org.name,
                     "organization_description": org.description,
-                    "organization_logo": (
-                        {
-                            "id": org.logo_id,
-                            "directory": org.logo_directory,
-                            "filename": org.logo_filename,
-                        }
-                        if org.logo_id
-                        else None
-                    ),
+                    "organization_logo": organization_logo,
                     "membership_status": membership.status,
                     "members": members,
                 }
