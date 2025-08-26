@@ -44,18 +44,24 @@ async def join_organization(
         raise HTTPException(status_code=404, detail="Organization not found")
 
     # Check if membership already exists
-    existing_membership = session.query(table["membership"]).filter_by(
-        organization_id=organization_id, user_id=user_id
-    ).first()
-    
+    existing_membership = (
+        session.query(table["membership"])
+        .filter_by(organization_id=organization_id, user_id=user_id)
+        .first()
+    )
+
     if existing_membership:
         # If membership exists but was rejected, update it to pending
         if existing_membership.status == "rejected":
             try:
-                update_stmt = update(table["membership"]).where(
-                    table["membership"].c.organization_id == organization_id,
-                    table["membership"].c.user_id == user_id
-                ).values(status="pending")
+                update_stmt = (
+                    update(table["membership"])
+                    .where(
+                        table["membership"].c.organization_id == organization_id,
+                        table["membership"].c.user_id == user_id,
+                    )
+                    .values(status="pending")
+                )
                 session.execute(update_stmt)
                 session.commit()
                 return {"message": "Membership request resubmitted"}
@@ -67,7 +73,7 @@ async def join_organization(
             raise HTTPException(
                 status_code=409, detail="Membership already exists or is pending"
             )
-    
+
     # Original implementation (commented out):
     # stmt = insert(table["membership"]).values(
     #     organization_id=organization_id, user_id=user_id, status="pending"
@@ -81,7 +87,7 @@ async def join_organization(
     #     raise HTTPException(
     #         status_code=409, detail="Membership already exists or is pending"
     #     )
-    
+
     # Insert new membership with pending status
     try:
         stmt = insert(table["membership"]).values(
@@ -385,28 +391,32 @@ async def get_pending_membership_organization(account_uuid: str):
                     table["resource"],
                     table["organization"].c.logo == table["resource"].c.id,
                 )
-                .filter(table["organization"].c.id == pending_membership.organization_id)
+                .filter(
+                    table["organization"].c.id == pending_membership.organization_id
+                )
                 .first()
             )
 
             if not org:
                 continue
 
-            pending_membership_list.append({
-                "organization_id": org.id,
-                "organization_name": org.name,
-                "organization_category": org.category,
-                "organization_logo": (
-                    {
-                        "id": org.logo_id,
-                        "directory": org.logo_directory,
-                        "filename": org.logo_filename,
-                    }
-                    if org.logo_id
-                    else None
-                ),
-                "membership_status": pending_membership.status,
-            })
+            pending_membership_list.append(
+                {
+                    "organization_id": org.id,
+                    "organization_name": org.name,
+                    "organization_category": org.category,
+                    "organization_logo": (
+                        {
+                            "id": org.logo_id,
+                            "directory": org.logo_directory,
+                            "filename": org.logo_filename,
+                        }
+                        if org.logo_id
+                        else None
+                    ),
+                    "membership_status": pending_membership.status,
+                }
+            )
 
         # if not org:
         #     raise HTTPException(status_code=404, detail="Organization not found")
@@ -586,8 +596,23 @@ async def get_rejected_membership_applications(
 async def get_organization_members(organization_id: int):
     session = db.session
     try:
-        # Check if organization exists
-        org = session.query(table["organization"]).filter_by(id=organization_id).first()
+        # Get organization with logo details
+        org = (
+            session.query(
+                table["organization"].c.id,
+                table["organization"].c.name,
+                table["organization"].c.logo,
+                table["resource"].c.directory.label("logo_directory"),
+                table["resource"].c.filename.label("logo_filename"),
+                table["resource"].c.id.label("logo_id"),
+            )
+            .outerjoin(
+                table["resource"],
+                table["organization"].c.logo == table["resource"].c.id,
+            )
+            .filter(table["organization"].c.id == organization_id)
+            .first()
+        )
         if not org:
             raise HTTPException(status_code=404, detail="Organization not found")
 
@@ -645,7 +670,16 @@ async def get_organization_members(organization_id: int):
             )
         return {
             "organization_id": org.id,
-            "organization_name": getattr(org, "name", None),
+            "organization_name": org.name,
+            "organization_logo": (
+                {
+                    "id": org.logo_id,
+                    "directory": org.logo_directory,
+                    "filename": org.logo_filename,
+                }
+                if org.logo_id
+                else None
+            ),
             "members": members,
         }
     except SQLAlchemyError as e:
