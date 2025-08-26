@@ -1775,7 +1775,6 @@ async def get_events_by_month_year(
         if organization_id is None:
             raise HTTPException(status_code=404, detail="Organization not found")
 
-        # Helper for filtering by month/year
         def month_year_filter(col):
             return (
                 func.extract("month", col) == month,
@@ -1822,6 +1821,7 @@ async def get_events_by_month_year(
         past_events = []
         for row in past_events_result:
             event = dict(row._mapping)
+            event_id = event["id"]
             event["image"] = (
                 {
                     "id": event["image"],
@@ -1854,6 +1854,125 @@ async def get_events_by_month_year(
             event.pop("address_province_code", None)
             event.pop("address_city_code", None)
             event.pop("address_barangay_code", None)
+
+            # Fetch RSVPs for this event, join user and profile picture
+            profile_resource = table["resource"].alias("profile_resource")
+            rsvp_stmt = (
+                select(
+                    table["rsvp"].c.id.label("rsvp_id"),
+                    table["rsvp"].c.status.label("rsvp_status"),
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.id.label("user_id"),
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                    table["user"].c.bio,
+                    table["user"].c.profile_picture.label("profile_picture_id"),
+                    profile_resource.c.directory.label("profile_picture_directory"),
+                    profile_resource.c.filename.label("profile_picture_filename"),
+                )
+                .select_from(
+                    table["rsvp"]
+                    .join(
+                        table["account"],
+                        table["rsvp"].c.attendee == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        profile_resource,
+                        table["user"].c.profile_picture == profile_resource.c.id,
+                    )
+                )
+                .where(table["rsvp"].c.event_id == event_id)
+            )
+            rsvp_result = session.execute(rsvp_stmt).fetchall()
+            rsvps = []
+            for rsvp_row in rsvp_result:
+                rsvp = dict(rsvp_row._mapping)
+                rsvp["user"] = {
+                    "id": rsvp.get("user_id"),
+                    "first_name": rsvp.get("first_name"),
+                    "last_name": rsvp.get("last_name"),
+                    "bio": rsvp.get("bio"),
+                    "profile_picture": (
+                        {
+                            "id": rsvp.get("profile_picture_id"),
+                            "directory": rsvp.get("profile_picture_directory"),
+                            "filename": rsvp.get("profile_picture_filename"),
+                        }
+                        if rsvp.get("profile_picture_id")
+                        else None
+                    ),
+                }
+                rsvp.pop("user_id", None)
+                rsvp.pop("first_name", None)
+                rsvp.pop("last_name", None)
+                rsvp.pop("bio", None)
+                rsvp.pop("profile_picture_id", None)
+                rsvp.pop("profile_picture_directory", None)
+                rsvp.pop("profile_picture_filename", None)
+                rsvps.append(rsvp)
+            event["rsvps"] = rsvps
+            event["rsvp_count"] = len(rsvps)
+
+            # Fetch top 3 latest comments and total count for this event
+            comment_count_stmt = select(func.count(table["comment"].c.id)).where(
+                table["comment"].c.event_id == event_id
+            )
+            total_comments = session.execute(comment_count_stmt).scalar() or 0
+
+            comments_stmt = (
+                select(
+                    table["comment"].c.id.label("comment_id"),
+                    table["comment"].c.message,
+                    table["comment"].c.created_date,
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                )
+                .select_from(
+                    table["comment"]
+                    .join(
+                        table["account"],
+                        table["comment"].c.author == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                )
+                .where(table["comment"].c.event_id == event_id)
+                .order_by(table["comment"].c.created_date.desc())
+                .limit(3)
+            )
+            comments_result = session.execute(comments_stmt).fetchall()
+            latest_comments = []
+            for row_comment in comments_result:
+                latest_comments.append(
+                    {
+                        "comment_id": row_comment._mapping["comment_id"],
+                        "message": row_comment._mapping["message"],
+                        "created_date": row_comment._mapping["created_date"],
+                        "account": {
+                            "id": row_comment._mapping["account_id"],
+                            "uuid": row_comment._mapping["uuid"],
+                            "email": row_comment._mapping["email"],
+                        },
+                        "user": {
+                            "first_name": row_comment._mapping["first_name"],
+                            "last_name": row_comment._mapping["last_name"],
+                        },
+                    }
+                )
+            event["latest_comments"] = latest_comments
+            event["total_comments"] = total_comments
+
             past_events.append(event)
 
         # Active events: today or future, status active
@@ -1896,6 +2015,7 @@ async def get_events_by_month_year(
         active_events = []
         for row in active_events_result:
             event = dict(row._mapping)
+            event_id = event["id"]
             event["image"] = (
                 {
                     "id": event["image"],
@@ -1928,6 +2048,125 @@ async def get_events_by_month_year(
             event.pop("address_province_code", None)
             event.pop("address_city_code", None)
             event.pop("address_barangay_code", None)
+
+            # Fetch RSVPs for this event, join user and profile picture
+            profile_resource = table["resource"].alias("profile_resource")
+            rsvp_stmt = (
+                select(
+                    table["rsvp"].c.id.label("rsvp_id"),
+                    table["rsvp"].c.status.label("rsvp_status"),
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.id.label("user_id"),
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                    table["user"].c.bio,
+                    table["user"].c.profile_picture.label("profile_picture_id"),
+                    profile_resource.c.directory.label("profile_picture_directory"),
+                    profile_resource.c.filename.label("profile_picture_filename"),
+                )
+                .select_from(
+                    table["rsvp"]
+                    .join(
+                        table["account"],
+                        table["rsvp"].c.attendee == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        profile_resource,
+                        table["user"].c.profile_picture == profile_resource.c.id,
+                    )
+                )
+                .where(table["rsvp"].c.event_id == event_id)
+            )
+            rsvp_result = session.execute(rsvp_stmt).fetchall()
+            rsvps = []
+            for rsvp_row in rsvp_result:
+                rsvp = dict(rsvp_row._mapping)
+                rsvp["user"] = {
+                    "id": rsvp.get("user_id"),
+                    "first_name": rsvp.get("first_name"),
+                    "last_name": rsvp.get("last_name"),
+                    "bio": rsvp.get("bio"),
+                    "profile_picture": (
+                        {
+                            "id": rsvp.get("profile_picture_id"),
+                            "directory": rsvp.get("profile_picture_directory"),
+                            "filename": rsvp.get("profile_picture_filename"),
+                        }
+                        if rsvp.get("profile_picture_id")
+                        else None
+                    ),
+                }
+                rsvp.pop("user_id", None)
+                rsvp.pop("first_name", None)
+                rsvp.pop("last_name", None)
+                rsvp.pop("bio", None)
+                rsvp.pop("profile_picture_id", None)
+                rsvp.pop("profile_picture_directory", None)
+                rsvp.pop("profile_picture_filename", None)
+                rsvps.append(rsvp)
+            event["rsvps"] = rsvps
+            event["rsvp_count"] = len(rsvps)
+
+            # Fetch top 3 latest comments and total count for this event
+            comment_count_stmt = select(func.count(table["comment"].c.id)).where(
+                table["comment"].c.event_id == event_id
+            )
+            total_comments = session.execute(comment_count_stmt).scalar() or 0
+
+            comments_stmt = (
+                select(
+                    table["comment"].c.id.label("comment_id"),
+                    table["comment"].c.message,
+                    table["comment"].c.created_date,
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                )
+                .select_from(
+                    table["comment"]
+                    .join(
+                        table["account"],
+                        table["comment"].c.author == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                )
+                .where(table["comment"].c.event_id == event_id)
+                .order_by(table["comment"].c.created_date.desc())
+                .limit(3)
+            )
+            comments_result = session.execute(comments_stmt).fetchall()
+            latest_comments = []
+            for row_comment in comments_result:
+                latest_comments.append(
+                    {
+                        "comment_id": row_comment._mapping["comment_id"],
+                        "message": row_comment._mapping["message"],
+                        "created_date": row_comment._mapping["created_date"],
+                        "account": {
+                            "id": row_comment._mapping["account_id"],
+                            "uuid": row_comment._mapping["uuid"],
+                            "email": row_comment._mapping["email"],
+                        },
+                        "user": {
+                            "first_name": row_comment._mapping["first_name"],
+                            "last_name": row_comment._mapping["last_name"],
+                        },
+                    }
+                )
+            event["latest_comments"] = latest_comments
+            event["total_comments"] = total_comments
+
             active_events.append(event)
 
         return {
