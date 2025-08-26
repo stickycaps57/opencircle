@@ -852,6 +852,7 @@ async def get_active_events_by_organizer(
             select(
                 table["event"].c.id,
                 table["event"].c.organization_id,
+                table["organization"].c.account_id.label("organization_account_id"),
                 table["organization"].c.name.label("organization_name"),
                 table["organization"].c.logo.label("organization_logo_id"),
                 organization_resource.c.directory.label("organization_logo_directory"),
@@ -946,6 +947,7 @@ async def get_active_events_by_organizer(
 
             event_data["organization"] = {
                 "id": event_data["organization_id"],
+                "account_id": event_data["organization_account_id"],
                 "name": event_data["organization_name"],
                 "logo": (
                     {
@@ -1330,6 +1332,7 @@ async def get_past_events_by_organizer(
             select(
                 table["event"].c.id,
                 table["event"].c.organization_id,
+                table["organization"].c.account_id.label("organization_account_id"),
                 table["organization"].c.name.label("organization_name"),
                 table["organization"].c.logo.label("organization_logo_id"),
                 organization_resource.c.directory.label("organization_logo_directory"),
@@ -1422,6 +1425,7 @@ async def get_past_events_by_organizer(
 
             event_data["organization"] = {
                 "id": event_data["organization_id"],
+                "account_id": event_data["organization_account_id"],
                 "name": event_data["organization_name"],
                 "logo": (
                     {
@@ -2076,6 +2080,7 @@ async def get_all_events_with_comments(
         events_stmt = (
             select(
                 table["event"],
+                table["organization"].c.account_id.label("org_account_id"),
                 table["organization"].c.id.label("org_id"),
                 table["organization"].c.name.label("org_name"),
                 table["organization"].c.description.label("org_description"),
@@ -2127,6 +2132,7 @@ async def get_all_events_with_comments(
             # Group organization details, including logo resource info
             event_data["organization"] = {
                 "id": event_data.pop("org_id"),
+                "account_id": event_data.pop("org_account_id"),
                 "name": event_data.pop("org_name"),
                 "description": event_data.pop("org_description"),
                 "logo": (
@@ -2919,6 +2925,36 @@ async def get_user_events_by_rsvp_status_with_comments(
             event.pop("organization_logo", None)
             event.pop("logo_directory", None)
             event.pop("logo_filename", None)
+            
+            # Get user_id for membership check
+            select_user = select(table["user"].c.id).where(
+                table["user"].c.account_id == account_id
+            )
+            user_id = session.execute(select_user).scalar()
+            
+            # Add user_membership_status_with_organizer
+            membership_status = None
+            if user_id and event["organization"]["id"]:
+                membership_stmt = select(table["membership"].c.status).where(
+                    (table["membership"].c.organization_id == event["organization"]["id"])
+                    & (table["membership"].c.user_id == user_id)
+                )
+                membership_status = session.execute(membership_stmt).scalar()
+            event["user_membership_status_with_organizer"] = membership_status
+            
+            # Add user_rsvp (we already know the RSVP status from the query filter)
+            rsvp_stmt = select(table["rsvp"].c.id).where(
+                (table["rsvp"].c.event_id == event["id"])
+                & (table["rsvp"].c.attendee == account_id)
+            )
+            rsvp_id = session.execute(rsvp_stmt).scalar()
+            if rsvp_id:
+                event["user_rsvp"] = {
+                    "rsvp_id": rsvp_id,
+                    "status": rsvp_status
+                }
+            else:
+                event["user_rsvp"] = None
 
             # For each event, fetch latest 3 comments (with correct commenter details)
             event_id = event["id"]
