@@ -3352,3 +3352,279 @@ async def get_event_by_id(
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/user/past_events_with_comments", tags=["Get User Past Events With Comments"]
+)
+async def get_user_past_events_with_comments(
+    account_uuid: str = Query(..., description="Account UUID of the user"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Events per page (max 100)"),
+):
+    session = db.session
+    try:
+        offset = (page - 1) * limit
+
+        select_account = select(table["account"].c.id).where(
+            table["account"].c.uuid == account_uuid
+        )
+        account_id = session.execute(select_account).scalar()
+        if account_id is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        logo_resource = table["resource"].alias("logo_resource")
+
+        count_stmt = (
+            select(func.count())
+            .select_from(
+                table["event"].join(
+                    table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id
+                )
+            )
+            .where(
+                (table["rsvp"].c.attendee == account_id)
+                & (table["event"].c.event_date < func.current_date())
+            )
+        )
+        total_events = session.execute(count_stmt).scalar()
+
+        events_stmt = (
+            select(
+                table["event"],
+                table["rsvp"].c.status.label("rsvp_status"),
+                table["address"].c.country.label("address_country"),
+                table["address"].c.province.label("address_province"),
+                table["address"].c.city.label("address_city"),
+                table["address"].c.barangay.label("address_barangay"),
+                table["address"].c.house_building_number.label(
+                    "address_house_building_number"
+                ),
+                table["address"].c.country_code.label("address_country_code"),
+                table["address"].c.province_code.label("address_province_code"),
+                table["address"].c.city_code.label("address_city_code"),
+                table["address"].c.barangay_code.label("address_barangay_code"),
+                table["resource"].c.directory.label("image_directory"),
+                table["resource"].c.filename.label("image_filename"),
+                table["organization"].c.id.label("org_id"),
+                table["organization"].c.name.label("organization_name"),
+                table["organization"].c.description.label("organization_description"),
+                table["organization"].c.logo.label("organization_logo"),
+                table["organization"].c.category.label("organization_category"),
+                logo_resource.c.directory.label("logo_directory"),
+                logo_resource.c.filename.label("logo_filename"),
+            )
+            .select_from(
+                table["event"]
+                .join(table["rsvp"], table["event"].c.id == table["rsvp"].c.event_id)
+                .outerjoin(
+                    table["address"],
+                    table["event"].c.address_id == table["address"].c.id,
+                )
+                .outerjoin(
+                    table["resource"], table["event"].c.image == table["resource"].c.id
+                )
+                .outerjoin(
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
+                )
+                .outerjoin(
+                    logo_resource, table["organization"].c.logo == logo_resource.c.id
+                )
+            )
+            .where(
+                (table["rsvp"].c.attendee == account_id)
+                & (table["event"].c.event_date < func.current_date())
+            )
+            .order_by(table["event"].c.event_date.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        events_result = session.execute(events_stmt).fetchall()
+        events = []
+        for row in events_result:
+            event = dict(row._mapping)
+            event["address"] = {
+                "id": event.get("address_id"),
+                "country": event.get("address_country"),
+                "province": event.get("address_province"),
+                "city": event.get("address_city"),
+                "barangay": event.get("address_barangay"),
+                "house_building_number": event.get("address_house_building_number"),
+                "country_code": event.get("address_country_code"),
+                "province_code": event.get("address_province_code"),
+                "city_code": event.get("address_city_code"),
+                "barangay_code": event.get("address_barangay_code"),
+            }
+            event.pop("address_country", None)
+            event.pop("address_province", None)
+            event.pop("address_city", None)
+            event.pop("address_barangay", None)
+            event.pop("address_house_building_number", None)
+            event.pop("address_country_code", None)
+            event.pop("address_province_code", None)
+            event.pop("address_city_code", None)
+            event.pop("address_barangay_code", None)
+
+            event["image"] = (
+                {
+                    "id": event.get("image"),
+                    "directory": event.get("image_directory"),
+                    "filename": event.get("image_filename"),
+                }
+                if event.get("image")
+                else None
+            )
+            event.pop("image_directory", None)
+            event.pop("image_filename", None)
+
+            event["organization"] = {
+                "id": event.pop("org_id"),
+                "name": event.pop("organization_name"),
+                "description": event.pop("organization_description"),
+                "logo": (
+                    {
+                        "id": event.get("organization_logo"),
+                        "directory": event.get("logo_directory"),
+                        "filename": event.get("logo_filename"),
+                    }
+                    if event.get("organization_logo")
+                    else None
+                ),
+                "category": event.pop("organization_category"),
+            }
+            event.pop("organization_logo", None)
+            event.pop("logo_directory", None)
+            event.pop("logo_filename", None)
+
+            event["rsvp_status"] = event.get("rsvp_status", "none")
+
+            event_id = event["id"]
+            comment_profile_resource = table["resource"].alias(
+                "comment_profile_resource"
+            )
+            comment_logo_resource = table["resource"].alias("comment_logo_resource")
+            comments_stmt = (
+                select(
+                    table["comment"].c.id.label("comment_id"),
+                    table["comment"].c.message,
+                    table["comment"].c.created_date,
+                    table["account"].c.id.label("account_id"),
+                    table["account"].c.uuid,
+                    table["account"].c.email,
+                    table["role"].c.name.label("role_name"),
+                    table["user"].c.first_name.label("user_first_name"),
+                    table["user"].c.last_name.label("user_last_name"),
+                    table["user"].c.profile_picture.label("profile_picture_id"),
+                    comment_profile_resource.c.directory.label(
+                        "profile_picture_directory"
+                    ),
+                    comment_profile_resource.c.filename.label(
+                        "profile_picture_filename"
+                    ),
+                    table["organization"].c.name.label("organization_name"),
+                    table["organization"].c.description.label(
+                        "organization_description"
+                    ),
+                    table["organization"].c.logo.label("organization_logo_id"),
+                    comment_logo_resource.c.directory.label(
+                        "organization_logo_directory"
+                    ),
+                    comment_logo_resource.c.filename.label(
+                        "organization_logo_filename"
+                    ),
+                )
+                .select_from(
+                    table["comment"]
+                    .join(
+                        table["account"],
+                        table["comment"].c.author == table["account"].c.id,
+                    )
+                    .join(
+                        table["role"],
+                        table["account"].c.role_id == table["role"].c.id,
+                    )
+                    .outerjoin(
+                        table["user"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        comment_profile_resource,
+                        table["user"].c.profile_picture
+                        == comment_profile_resource.c.id,
+                    )
+                    .outerjoin(
+                        table["organization"],
+                        table["organization"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        comment_logo_resource,
+                        table["organization"].c.logo == comment_logo_resource.c.id,
+                    )
+                )
+                .where(table["comment"].c.event_id == event_id)
+                .order_by(table["comment"].c.created_date.desc())
+                .limit(3)
+            )
+            comments_result = session.execute(comments_stmt).fetchall()
+            latest_comments = []
+            for row in comments_result:
+                data = row._mapping
+                role_name = data.get("role_name")
+                comment_obj = {
+                    "comment_id": data["comment_id"],
+                    "message": data["message"],
+                    "created_date": data["created_date"],
+                    "account": {
+                        "id": data["account_id"],
+                        "uuid": data["uuid"],
+                        "email": data["email"],
+                    },
+                    "role": role_name,
+                }
+                if role_name == "organization":
+                    comment_obj["organization"] = {
+                        "name": data["organization_name"],
+                        "description": data["organization_description"],
+                        "logo": (
+                            {
+                                "id": data["organization_logo_id"],
+                                "directory": data["organization_logo_directory"],
+                                "filename": data["organization_logo_filename"],
+                            }
+                            if data["organization_logo_id"]
+                            else None
+                        ),
+                    }
+                else:
+                    comment_obj["user"] = {
+                        "first_name": data["user_first_name"],
+                        "last_name": data["user_last_name"],
+                        "profile_picture": (
+                            {
+                                "id": data["profile_picture_id"],
+                                "directory": data["profile_picture_directory"],
+                                "filename": data["profile_picture_filename"],
+                            }
+                            if data["profile_picture_id"]
+                            else None
+                        ),
+                    }
+                latest_comments.append(comment_obj)
+            event["latest_comments"] = latest_comments
+
+            events.append(event)
+
+        return {
+            "events": events,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_events,
+                "pages": (total_events + limit - 1) // limit,
+            },
+        }
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
