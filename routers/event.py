@@ -2449,9 +2449,17 @@ async def get_all_events_with_comments(
 
             events.append(event_data)
 
-        # For each event, get top 3 latest comments (including organization details if commenter is org)
+        # For each event, get total comments count and top 3 latest comments (including organization details if commenter is org)
         for event in events:
             event_id = event["id"]
+            
+            # Get total comments count for this event
+            total_comments_stmt = select(func.count()).select_from(table["comment"]).where(
+                table["comment"].c.event_id == event_id
+            )
+            total_comments = session.execute(total_comments_stmt).scalar()
+            event["total_comments"] = total_comments
+            
             comment_profile_resource = table["resource"].alias(
                 "comment_profile_resource"
             )
@@ -2756,6 +2764,7 @@ async def get_user_rsvped_events_by_month_year(
                 table["comment"].c.event_id == event_id
             )
             total_comments = session.execute(comment_count_stmt).scalar() or 0
+            event_data["total_comments"] = total_comments
 
             # Top 3 latest comments
             comments_stmt = (
