@@ -126,6 +126,14 @@ async def get_all_posts(
             data = row._mapping
             post_id = data["id"]
 
+            # Get total comments count for this post
+            total_comments_stmt = (
+                select(func.count())
+                .select_from(table["comment"])
+                .where(table["comment"].c.post_id == post_id)
+            )
+            total_comments = session.execute(total_comments_stmt).scalar()
+            
             # Fetch top 3 latest comments for this post, join user/org profile_picture/logo to resource
             comment_resource = table["resource"].alias("comment_resource")
             comment_stmt = (
@@ -275,6 +283,7 @@ async def get_all_posts(
                     "description": data["description"],
                     "created_date": data["created_date"],
                     "latest_comments": comments,
+                    "total_comments": total_comments,
                 }
             )
         return {
@@ -663,6 +672,7 @@ async def get_posts_with_comments(
                         }
                     )
 
+            # Add total comments count to post
             post_dict["total_comments"] = total_comments
             post_dict["comments"] = comments
             # Add image resource details to post (all fields)
