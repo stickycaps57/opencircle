@@ -395,3 +395,131 @@ async def logout(response: Response, session_token: str = Cookie(None)):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/auth_user", tags=["Get Current User"])
+async def get_current_user(session_token: str = Cookie(None)):
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+    
+    try:
+        # Use utility function to get account_uuid from session
+        account_uuid = get_account_uuid_from_session(session_token)
+        
+        # Get account details
+        account_stmt = select(table["account"]).where(table["account"].c.uuid == account_uuid)
+        account_result = session.execute(account_stmt).first()
+        if not account_result:
+            raise HTTPException(status_code=404, detail="Account not found")
+        account = account_result._mapping
+        
+        # Check if user or organization based on role_id
+        if account["role_id"] == 1:  # User
+            # Get user details linked to account, join resource for profile picture
+            user_stmt = (
+                select(
+                    table["user"].c.id,
+                    table["user"].c.account_id,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                    table["user"].c.bio,
+                    table["account"].c.email,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
+                )
+                .select_from(
+                    table["user"].outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
+                )
+                .where(table["user"].c.account_id == account["id"])
+            )
+            user_result = session.execute(user_stmt).first()
+            if not user_result:
+                raise HTTPException(status_code=404, detail="User not found for this account")
+            user = user_result._mapping
+            
+            return {
+                "user": {
+                    "id": user["id"],
+                    "account_id": user["account_id"],
+                    "first_name": user["first_name"],
+                    "last_name": user["last_name"],
+                    "bio": user["bio"],
+                    "email": account["email"],
+                    "profile_picture": (
+                        {
+                            "id": user["profile_picture"],
+                            "directory": user["profile_picture_directory"],
+                            "filename": user["profile_picture_filename"],
+                        }
+                        if user["profile_picture"]
+                        else None
+                    ),
+                    "uuid": account["uuid"],
+                    "role_id": account["role_id"],
+                }
+            }
+        elif account["role_id"] == 2:  # Organization
+            # Get organization details linked to account, join resource for logo
+            org_stmt = (
+                select(
+                    table["organization"].c.id,
+                    table["organization"].c.account_id,
+                    table["organization"].c.name,
+                    table["organization"].c.logo,
+                    table["organization"].c.category,
+                    table["organization"].c.description,
+                    table["account"].c.email,
+                    table["resource"].c.directory.label("logo_directory"),
+                    table["resource"].c.filename.label("logo_filename"),
+                )
+                .select_from(
+                    table["organization"].outerjoin(
+                        table["resource"],
+                        table["organization"].c.logo == table["resource"].c.id,
+                    )
+                )
+                .where(table["organization"].c.account_id == account["id"])
+            )
+            org_result = session.execute(org_stmt).first()
+            if not org_result:
+                raise HTTPException(
+                    status_code=404, detail="Organization not found for this account"
+                )
+            organization = org_result._mapping
+            
+            return {
+                "organization": {
+                    "id": organization["id"],
+                    "account_id": organization["account_id"],
+                    "name": organization["name"],
+                    "email": account["email"],
+                    "logo": (
+                        {
+                            "id": organization["logo"],
+                            "directory": organization["logo_directory"],
+                            "filename": organization["logo_filename"],
+                        }
+                        if organization["logo"]
+                        else None
+                    ),
+                    "category": organization["category"],
+                    "description": organization["description"],
+                    "uuid": account["uuid"],
+                    "role_id": account["role_id"],
+                }
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Unknown account type")
+    except HTTPException as e:
+        # Re-raise HTTP exceptions to preserve status code and detail
+        raise e
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
