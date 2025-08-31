@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Form
+from fastapi import APIRouter, HTTPException, Form, Path
 from lib.database import Database
-from sqlalchemy import insert, update
+from sqlalchemy import insert, update, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
@@ -14,7 +14,6 @@ router = APIRouter(
 
 db = Database()
 table = db.tables
-
 
 @router.post("/join", tags=["Join Organization"])
 async def join_organization(
@@ -819,6 +818,73 @@ async def search_organizations(query: str):
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
     except Exception as e:
         session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.get("/{organization_id}", tags=["Get Organization Details"])
+async def get_organization_by_id(organization_id: int = Path(...)):
+    session = db.session
+    try:
+        # Get organization details by joining with account and resource tables
+        org_stmt = (
+            select(
+                table["organization"].c.id,
+                table["organization"].c.account_id,
+                table["organization"].c.name,
+                table["organization"].c.logo,
+                table["organization"].c.category,
+                table["organization"].c.description,
+                table["account"].c.email,
+                table["account"].c.uuid,
+                table["account"].c.role_id,
+                table["resource"].c.directory.label("logo_directory"),
+                table["resource"].c.filename.label("logo_filename"),
+            )
+            .select_from(
+                table["organization"]
+                .join(
+                    table["account"],
+                    table["organization"].c.account_id == table["account"].c.id,
+                )
+                .outerjoin(
+                    table["resource"],
+                    table["organization"].c.logo == table["resource"].c.id,
+                )
+            )
+            .where(table["organization"].c.id == organization_id)
+        )
+        
+        org_result = session.execute(org_stmt).first()
+        if not org_result:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        organization = org_result._mapping
+        
+        # Return organization details in the same format as in account.py
+        return {
+            "id": organization["id"],
+                "account_id": organization["account_id"],
+                "name": organization["name"],
+                "email": organization["email"],
+                "logo": (
+                    {
+                        "id": organization["logo"],
+                        "directory": organization["logo_directory"],
+                        "filename": organization["logo_filename"],
+                    }
+                    if organization["logo"]
+                    else None
+                ),
+                "category": organization["category"],
+                "description": organization["description"],
+                "uuid": organization["uuid"],
+                "role_id": organization["role_id"],
+        }
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
