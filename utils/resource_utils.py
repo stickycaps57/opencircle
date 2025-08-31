@@ -7,6 +7,7 @@ from lib.database import Database
 
 # put in a yaml file or secret or OS env variable
 UPLOAD_DIR = "uploads"
+# UPLOAD_DIR = "https://opencircle.pythonanywhere.com/uploads/"
 
 
 db = Database()
