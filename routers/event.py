@@ -1786,6 +1786,7 @@ async def get_events_by_month_year(
             )
 
         # Past events: before today
+        logo_resource = table["resource"].alias("logo_resource")
         past_stmt = (
             select(
                 table["event"],
@@ -1802,15 +1803,28 @@ async def get_events_by_month_year(
                 table["address"].c.barangay_code.label("address_barangay_code"),
                 table["resource"].c.directory.label("image_directory"),
                 table["resource"].c.filename.label("image_filename"),
+                table["organization"].c.name.label("organization_name"),
+                table["organization"].c.description.label("organization_description"),
+                table["organization"].c.logo.label("organization_logo"),
+                table["organization"].c.category.label("organization_category"),
+                logo_resource.c.directory.label("logo_directory"),
+                logo_resource.c.filename.label("logo_filename"),
             )
             .select_from(
                 table["event"]
+                .join(
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
+                )
                 .outerjoin(
                     table["address"],
                     table["event"].c.address_id == table["address"].c.id,
                 )
                 .outerjoin(
                     table["resource"], table["event"].c.image == table["resource"].c.id
+                )
+                .outerjoin(
+                    logo_resource, table["organization"].c.logo == logo_resource.c.id
                 )
             )
             .where(
@@ -1858,6 +1872,29 @@ async def get_events_by_month_year(
             event.pop("address_province_code", None)
             event.pop("address_city_code", None)
             event.pop("address_barangay_code", None)
+
+            # Add organization object
+            event["organization"] = {
+                "id": event["organization_id"],
+                "name": event["organization_name"],
+                "description": event["organization_description"],
+                "logo": (
+                    {
+                        "id": event["organization_logo"],
+                        "directory": event.get("logo_directory"),
+                        "filename": event.get("logo_filename"),
+                    }
+                    if event.get("organization_logo")
+                    else None
+                ),
+                "category": event["organization_category"],
+            }
+            event.pop("organization_name", None)
+            event.pop("organization_description", None)
+            event.pop("organization_logo", None)
+            event.pop("organization_category", None)
+            event.pop("logo_directory", None)
+            event.pop("logo_filename", None)
 
             # Fetch RSVPs for this event, join user and profile picture
             profile_resource = table["resource"].alias("profile_resource")
@@ -1996,15 +2033,28 @@ async def get_events_by_month_year(
                 table["address"].c.barangay_code.label("address_barangay_code"),
                 table["resource"].c.directory.label("image_directory"),
                 table["resource"].c.filename.label("image_filename"),
+                table["organization"].c.name.label("organization_name"),
+                table["organization"].c.description.label("organization_description"),
+                table["organization"].c.logo.label("organization_logo"),
+                table["organization"].c.category.label("organization_category"),
+                logo_resource.c.directory.label("logo_directory"),
+                logo_resource.c.filename.label("logo_filename"),
             )
             .select_from(
                 table["event"]
+                .join(
+                    table["organization"],
+                    table["event"].c.organization_id == table["organization"].c.id,
+                )
                 .outerjoin(
                     table["address"],
                     table["event"].c.address_id == table["address"].c.id,
                 )
                 .outerjoin(
                     table["resource"], table["event"].c.image == table["resource"].c.id
+                )
+                .outerjoin(
+                    logo_resource, table["organization"].c.logo == logo_resource.c.id
                 )
             )
             .where(
@@ -2052,6 +2102,29 @@ async def get_events_by_month_year(
             event.pop("address_province_code", None)
             event.pop("address_city_code", None)
             event.pop("address_barangay_code", None)
+
+            # Add organization object
+            event["organization"] = {
+                "id": event["organization_id"],
+                "name": event["organization_name"],
+                "description": event["organization_description"],
+                "logo": (
+                    {
+                        "id": event["organization_logo"],
+                        "directory": event.get("logo_directory"),
+                        "filename": event.get("logo_filename"),
+                    }
+                    if event.get("organization_logo")
+                    else None
+                ),
+                "category": event["organization_category"],
+            }
+            event.pop("organization_name", None)
+            event.pop("organization_description", None)
+            event.pop("organization_logo", None)
+            event.pop("organization_category", None)
+            event.pop("logo_directory", None)
+            event.pop("logo_filename", None)
 
             # Fetch RSVPs for this event, join user and profile picture
             profile_resource = table["resource"].alias("profile_resource")
