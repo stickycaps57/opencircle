@@ -85,7 +85,7 @@ async def create_event(
         organization_id = session.execute(select_organization).scalar()
         if organization_id is None:
             raise HTTPException(status_code=404, detail="Organization not found")
-
+            
         # Insert resource (image) if provided
         image_id = None
         if image:
@@ -1773,7 +1773,11 @@ async def get_events_by_month_year(
         )
         organization_id = session.execute(select_organization).scalar()
         if organization_id is None:
-            raise HTTPException(status_code=404, detail="Organization not found")
+            # raise HTTPException(status_code=404, detail="Organization not found")
+            return {
+                "past_events": [],
+                "active_events": [],
+            }
 
         def month_year_filter(col):
             return (
