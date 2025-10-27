@@ -4,6 +4,7 @@ from sqlalchemy import insert, update, delete, func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
+from utils.profanity_filter import moderate_text
 
 router = APIRouter(
     prefix="/comment",
@@ -32,6 +33,23 @@ async def add_comment_to_post(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     account_id = account.id
+
+    # Moderate message for profanity and toxicity
+    if message:
+        message_str = str(message)
+        moderation_result = moderate_text(
+            message_str,
+            toxicity_threshold=0.7,
+            auto_censor=True  # Set to False to reject instead of censoring
+        )
+        
+        if not moderation_result["approved"]:
+            raise HTTPException(
+                status_code=400,
+                detail=moderation_result["reason"]
+            )
+        
+        message = moderation_result["moderated_text"]
 
     stmt = insert(table["comment"]).values(
         post_id=post_id, event_id=None, author=account_id, message=message
@@ -71,6 +89,23 @@ async def add_comment_to_event(
         raise HTTPException(status_code=404, detail="Account not found")
     account_id = account.id
 
+    # Moderate message for profanity and toxicity
+    if message:
+        message_str = str(message)
+        moderation_result = moderate_text(
+            message_str,
+            toxicity_threshold=0.7,
+            auto_censor=True  # Set to False to reject instead of censoring
+        )
+        
+        if not moderation_result["approved"]:
+            raise HTTPException(
+                status_code=400,
+                detail=moderation_result["reason"]
+            )
+        
+        message = moderation_result["moderated_text"]
+
     stmt = insert(table["comment"]).values(
         event_id=event_id, post_id=None, author=account_id, message=message
     )
@@ -108,6 +143,23 @@ async def update_comment(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     account_id = account.id
+
+    # Moderate message for profanity and toxicity
+    if message:
+        message_str = str(message)
+        moderation_result = moderate_text(
+            message_str,
+            toxicity_threshold=0.7,
+            auto_censor=True  # Set to False to reject instead of censoring
+        )
+        
+        if not moderation_result["approved"]:
+            raise HTTPException(
+                status_code=400,
+                detail=moderation_result["reason"]
+            )
+        
+        message = moderation_result["moderated_text"]
 
     # Only allow update if the account is the author
     stmt = (
