@@ -213,7 +213,12 @@ async def user_sign_in(
             table["resource"].c.filename.label("profile_picture_filename"),
         )
         .select_from(
-            table["user"].outerjoin(
+            table["user"]
+            .join(
+                table["account"],
+                table["user"].c.account_id == table["account"].c.id,
+            )
+            .outerjoin(
                 table["resource"],
                 table["user"].c.profile_picture == table["resource"].c.id,
             )
@@ -232,16 +237,6 @@ async def user_sign_in(
     )
     session_token = session_details["session_token"]
     expires_at = session_details["expires_at"]
-
-    # response.set_cookie(
-    #     key="session_token",
-    #     value=session_token,
-    #     httponly=True,
-    #     secure=True,  # Set to True in production
-    #     samesite="Lax",
-    #     path="/",
-    #     expires=expires_at,
-    # )
 
     response.set_cookie(
         key="session_token",
@@ -312,7 +307,12 @@ async def organization_sign_in(
             table["resource"].c.filename.label("logo_filename"),
         )
         .select_from(
-            table["organization"].outerjoin(
+            table["organization"]
+            .join(
+                table["account"],
+                table["organization"].c.account_id == table["account"].c.id,
+            )
+            .outerjoin(
                 table["resource"],
                 table["organization"].c.logo == table["resource"].c.id,
             )
@@ -333,16 +333,6 @@ async def organization_sign_in(
     )
     session_token = session_details["session_token"]
     expires_at = session_details["expires_at"]
-
-    # response.set_cookie(
-    #     key="session_token",
-    #     value=session_token,
-    #     httponly=True,
-    #     secure=True,  # Set to True in production
-    #     samesite="Lax",
-    #     path="/",
-    #     expires=expires_at,
-    # )
 
     response.set_cookie(
         key="session_token",
@@ -429,7 +419,12 @@ async def get_current_user(session_token: str = Cookie(None)):
                     table["resource"].c.filename.label("profile_picture_filename"),
                 )
                 .select_from(
-                    table["user"].outerjoin(
+                    table["user"]
+                    .join(
+                        table["account"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
                         table["resource"],
                         table["user"].c.profile_picture == table["resource"].c.id,
                     )
@@ -477,7 +472,12 @@ async def get_current_user(session_token: str = Cookie(None)):
                     table["resource"].c.filename.label("logo_filename"),
                 )
                 .select_from(
-                    table["organization"].outerjoin(
+                    table["organization"]
+                    .join(
+                        table["account"],
+                        table["organization"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
                         table["resource"],
                         table["organization"].c.logo == table["resource"].c.id,
                     )
