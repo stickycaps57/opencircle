@@ -18,6 +18,7 @@ from lib.models import PostModel
 from sqlalchemy import update, delete
 from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
+from utils.profanity_filter import moderate_text
 import json
 
 
@@ -52,6 +53,22 @@ async def create_post(
         account_id = session.execute(select_stmt).scalar()
         if account_id is None:
             raise HTTPException(status_code=404, detail="Account not found")
+
+        # Moderate description for profanity and toxicity
+        if description:
+            moderation_result = moderate_text(
+                description, 
+                toxicity_threshold=0.7, 
+                auto_censor=True  # Set to False to reject instead of censoring
+            )
+            
+            if not moderation_result["approved"]:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=moderation_result["reason"]
+                )
+            
+            description = moderation_result["moderated_text"]
 
         # Handle multiple images: store resource IDs as a JSON array (list of ints)
         resource_ids = []
@@ -449,7 +466,7 @@ async def get_posts(
         posts = []
         for row in result:
             data = row._mapping
-            
+
             # Parse image JSON to get resource IDs and fetch resource details
             images = []
             if data["image"]:
@@ -473,7 +490,7 @@ async def get_posts(
                             )
                 except (json.JSONDecodeError, TypeError):
                     pass
-            
+
             posts.append(
                 {
                     "id": data["id"],
@@ -805,7 +822,22 @@ async def update_post(
         # Prepare update values
         update_values = {}
         if description is not None:
-            update_values["description"] = description
+            # Ensure description is a string
+            description_str = str(description)
+            # Moderate description for profanity and toxicity
+            moderation_result = moderate_text(
+                description_str, 
+                toxicity_threshold=0.7, 
+                auto_censor=True  # Set to False to reject instead of censoring
+            )
+            
+            if not moderation_result["approved"]:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=moderation_result["reason"]
+                )
+            
+            update_values["description"] = moderation_result["moderated_text"]
         
         if images is not None:
             # Delete existing images
