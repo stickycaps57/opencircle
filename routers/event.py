@@ -20,6 +20,7 @@ from sqlalchemy import update, delete
 from utils.address_utils import add_address, update_address
 from utils.resource_utils import add_resource
 from utils.session_utils import get_account_uuid_from_session
+from utils.profanity_filter import moderate_text
 
 
 router = APIRouter(
@@ -85,6 +86,40 @@ async def create_event(
         organization_id = session.execute(select_organization).scalar()
         if organization_id is None:
             raise HTTPException(status_code=404, detail="Organization not found")
+
+        # Moderate title for profanity and toxicity
+        if title:
+            title_str = str(title)
+            title_moderation = moderate_text(
+                title_str,
+                toxicity_threshold=0.7,
+                auto_censor=True
+            )
+            
+            if not title_moderation["approved"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Title {title_moderation['reason']}"
+                )
+            
+            title = title_moderation["moderated_text"]
+
+        # Moderate description for profanity and toxicity
+        if description:
+            description_str = str(description)
+            description_moderation = moderate_text(
+                description_str,
+                toxicity_threshold=0.7,
+                auto_censor=True
+            )
+            
+            if not description_moderation["approved"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Description {description_moderation['reason']}"
+                )
+            
+            description = description_moderation["moderated_text"]
             
         # Insert resource (image) if provided
         image_id = None
@@ -359,11 +394,41 @@ async def update_event(
         update_data = {}
 
         if title is not None:
-            update_data["title"] = title
+            # Moderate title for profanity and toxicity
+            title_str = str(title)
+            title_moderation = moderate_text(
+                title_str,
+                toxicity_threshold=0.7,
+                auto_censor=True
+            )
+            
+            if not title_moderation["approved"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Title {title_moderation['reason']}"
+                )
+            
+            update_data["title"] = title_moderation["moderated_text"]
+
         if event_date is not None:
             update_data["event_date"] = event_date
+
         if description is not None:
-            update_data["description"] = description
+            # Moderate description for profanity and toxicity
+            description_str = str(description)
+            description_moderation = moderate_text(
+                description_str,
+                toxicity_threshold=0.7,
+                auto_censor=True
+            )
+            
+            if not description_moderation["approved"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Description {description_moderation['reason']}"
+                )
+            
+            update_data["description"] = description_moderation["moderated_text"]
 
         # Update address if any address field is provided
         address_fields = [
