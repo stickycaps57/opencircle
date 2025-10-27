@@ -72,7 +72,7 @@ CREATE TABLE `post` (
   PRIMARY KEY (`id`),
   KEY `post_account_FK` (`author`),
   CONSTRAINT `post_account_FK` FOREIGN KEY (`author`) REFERENCES `account` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `session` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -179,10 +179,11 @@ CREATE TABLE `shares` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `account_uuid` char(32) NOT NULL,
   `content_id` bigint(20) NOT NULL,
-  `content_type` int(11) NOT NULL,
+  `content_type` smallint(6) NOT NULL,
   `comment` text DEFAULT NULL,
   `date_created` datetime NOT NULL DEFAULT current_timestamp(),
   `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
-  KEY `shares_account_uuid_IDX` (`account_uuid`,`content_id`,`content_type`) USING BTREE
+  KEY `shares_account_uuid_IDX` (`account_uuid`,`content_id`,`content_type`) USING BTREE,
+  CONSTRAINT `shares_account_FK` FOREIGN KEY (`account_uuid`) REFERENCES `account` (`uuid`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
