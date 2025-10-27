@@ -100,6 +100,18 @@ tests = ["pytest (>=3.2.1,!=3.3.0)"]
 typecheck = ["mypy"]
 
 [[package]]
+name = "better-profanity"
+version = "0.7.0"
+description = "Blazingly fast cleaning swear words (and their leetspeak) in strings"
+optional = false
+python-versions = "==3.*"
+groups = ["main"]
+files = [
+    {file = "better_profanity-0.7.0-py3-none-any.whl", hash = "sha256:bd4c529ea6aa2db1aaa50524be1ed14d0fe5c664f1fd88c8bc388c7e9f9f00e8"},
+    {file = "better_profanity-0.7.0.tar.gz", hash = "sha256:8a6fdc8606d7471e7b5f6801917eca98ec211098262e82f62da4f5de3a73145b"},
+]
+
+[[package]]
 name = "black"
 version = "25.1.0"
 description = "The uncompromising code formatter."
@@ -1205,18 +1217,6 @@ test = ["appdirs (==1.4.4)", "covdefaults (>=2.3)", "pytest (>=8.3.4)", "pytest-
 type = ["mypy (>=1.14.1)"]
 
 [[package]]
-name = "profanity-check2"
-version = "0.1.1"
-description = "Profanity Check2: Drop-in Replacement for profanity-check"
-optional = false
-python-versions = "<4.0,>=3.7.1"
-groups = ["main"]
-files = [
-    {file = "profanity-check2-0.1.1.tar.gz", hash = "sha256:865d6546f0e173bad7f3da65105b995a8ec103a0b4d3d98bbd709c759772b8bf"},
-    {file = "profanity_check2-0.1.1-py3-none-any.whl", hash = "sha256:766df9cd3149b9466377fd9b82b43a876d0c507956c9b479260a47cc7a7ec13e"},
-]
-
-[[package]]
 name = "pydantic"
 version = "2.11.7"
 description = "Data validation using Python type hints"
@@ -2257,4 +2257,4 @@ standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.6.3)
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "6a26c2ead19784671e251a0ca9e19e1fce62aa50925fef2a110690768459887e"
+content-hash = "1d5c64a5cdab5e897cbb559146086cc21d91e90336083b892aea301f23f85a7b"
