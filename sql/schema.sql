@@ -65,16 +65,14 @@ CREATE TABLE `organization` (
 CREATE TABLE `post` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `author` bigint(20) NOT NULL,
-  `image` bigint(20) DEFAULT NULL,
+  `image` text DEFAULT NULL,
   `description` text NOT NULL,
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
   `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `post_account_FK` (`author`),
-  KEY `post_resource_FK` (`image`),
-  CONSTRAINT `post_account_FK` FOREIGN KEY (`author`) REFERENCES `account` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `post_resource_FK` FOREIGN KEY (`image`) REFERENCES `resource` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+  CONSTRAINT `post_account_FK` FOREIGN KEY (`author`) REFERENCES `account` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
 CREATE TABLE `session` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -176,8 +174,6 @@ insert
 	role (name)
 values ('user'),
 ('organization');
-
--- opencircle.shares definition
 
 CREATE TABLE `shares` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,

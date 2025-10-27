@@ -18,6 +18,7 @@ from lib.models import PostModel
 from sqlalchemy import update, delete
 from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
+import json
 
 
 router = APIRouter(
@@ -32,9 +33,9 @@ table = db.tables
 
 @router.post("/", tags=["Create Post"])
 async def create_post(
-    image: UploadFile = File(None),
     description: str = Form(None),
     session_token: str = Cookie(None, alias="session_token"),
+    images: Optional[list[UploadFile]] = File(None),
 ):
     session = db.session
 
@@ -52,11 +53,20 @@ async def create_post(
         if account_id is None:
             raise HTTPException(status_code=404, detail="Account not found")
 
-        resource_id = add_resource(image, account_uuid) if image else None
+        # Handle multiple images: store resource IDs as a JSON array (list of ints)
+        resource_ids = []
+        if images:
+            for image in images:
+                if image.filename:  # Check if file was actually uploaded
+                    resource_id = add_resource(image, account_uuid)
+                    resource_ids.append(resource_id)
+
+        # Store resource_ids as JSON string if not empty, else None
+        images_field = json.dumps(resource_ids) if resource_ids else None
 
         stmt = insert(table["post"]).values(
             author=account_id,
-            image=resource_id,
+            image=images_field,
             description=description,
         )
         session.execute(stmt)
@@ -82,6 +92,7 @@ async def get_all_posts(
         offset = (page - 1) * page_size
         profile_resource = table["resource"].alias("profile_resource")
         org_logo_resource = table["resource"].alias("org_logo_resource")
+
         post_stmt = (
             select(
                 table["post"].c.id,
@@ -95,9 +106,6 @@ async def get_all_posts(
                 table["user"].c.last_name.label("author_last_name"),
                 table["user"].c.bio.label("author_bio"),
                 table["user"].c.profile_picture.label("author_profile_picture"),
-                table["resource"].c.directory.label("image_directory"),
-                table["resource"].c.filename.label("image_filename"),
-                table["resource"].c.id.label("image_id"),
                 profile_resource.c.directory.label("author_profile_picture_directory"),
                 profile_resource.c.filename.label("author_profile_picture_filename"),
                 profile_resource.c.id.label("author_profile_picture_id"),
@@ -107,9 +115,6 @@ async def get_all_posts(
                 .join(table["account"], table["post"].c.author == table["account"].c.id)
                 .outerjoin(
                     table["user"], table["user"].c.account_id == table["account"].c.id
-                )
-                .outerjoin(
-                    table["resource"], table["post"].c.image == table["resource"].c.id
                 )
                 .outerjoin(
                     profile_resource,
@@ -126,6 +131,30 @@ async def get_all_posts(
             data = row._mapping
             post_id = data["id"]
 
+            # Parse image JSON to get resource IDs and fetch resource details
+            images = []
+            if data["image"]:
+                try:
+                    resource_ids = json.loads(data["image"])
+                    for res_id in resource_ids:
+                        res_stmt = select(
+                            table["resource"].c.id,
+                            table["resource"].c.directory,
+                            table["resource"].c.filename,
+                        ).where(table["resource"].c.id == res_id)
+                        res_result = session.execute(res_stmt).first()
+                        if res_result:
+                            res_data = res_result._mapping
+                            images.append(
+                                {
+                                    "id": res_data["id"],
+                                    "directory": res_data["directory"],
+                                    "filename": res_data["filename"],
+                                }
+                            )
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
             # Get total comments count for this post
             total_comments_stmt = (
                 select(func.count())
@@ -133,8 +162,8 @@ async def get_all_posts(
                 .where(table["comment"].c.post_id == post_id)
             )
             total_comments = session.execute(total_comments_stmt).scalar()
-            
-            # Fetch top 3 latest comments for this post, join user/org profile_picture/logo to resource
+
+            # Fetch top 3 latest comments...
             comment_resource = table["resource"].alias("comment_resource")
             comment_stmt = (
                 select(
@@ -271,15 +300,7 @@ async def get_all_posts(
                         if data["author_profile_picture_id"]
                         else None
                     ),
-                    "image": (
-                        {
-                            "id": data["image_id"],
-                            "directory": data["image_directory"],
-                            "filename": data["image_filename"],
-                        }
-                        if data["image_id"]
-                        else None
-                    ),
+                    "images": images,
                     "description": data["description"],
                     "created_date": data["created_date"],
                     "latest_comments": comments,
@@ -334,13 +355,6 @@ async def get_posts(
                 table["post"].c.description,
                 table["post"].c.created_date,
                 table["post"].c.last_modified_date,
-                table["resource"].c.directory.label("image_directory"),
-                table["resource"].c.filename.label("image_filename"),
-            )
-            .select_from(
-                table["post"].outerjoin(
-                    table["resource"], table["post"].c.image == table["resource"].c.id
-                )
             )
             .where(table["post"].c.author == account_id)
             .order_by(table["post"].c.created_date.desc())
@@ -435,19 +449,36 @@ async def get_posts(
         posts = []
         for row in result:
             data = row._mapping
+            
+            # Parse image JSON to get resource IDs and fetch resource details
+            images = []
+            if data["image"]:
+                try:
+                    resource_ids = json.loads(data["image"])
+                    for res_id in resource_ids:
+                        res_stmt = select(
+                            table["resource"].c.id,
+                            table["resource"].c.directory,
+                            table["resource"].c.filename,
+                        ).where(table["resource"].c.id == res_id)
+                        res_result = session.execute(res_stmt).first()
+                        if res_result:
+                            res_data = res_result._mapping
+                            images.append(
+                                {
+                                    "id": res_data["id"],
+                                    "directory": res_data["directory"],
+                                    "filename": res_data["filename"],
+                                }
+                            )
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            
             posts.append(
                 {
                     "id": data["id"],
                     "author_id": data["author"],
-                    "image": (
-                        {
-                            "id": data["image"],
-                            "directory": data["image_directory"],
-                            "filename": data["image_filename"],
-                        }
-                        if data["image"]
-                        else None
-                    ),
+                    "images": images,
                     "description": data["description"],
                     "created_date": data["created_date"],
                     "last_modified_date": data["last_modified_date"],
@@ -494,7 +525,7 @@ async def get_posts_with_comments(
         profile_resource = table["resource"].alias("profile_resource")
         org_logo_resource = table["resource"].alias("org_logo_resource")
 
-        # Fetch posts with resource details, join author to account and user, join user.profile_picture to resource
+        # Fetch posts with author details (no image join since we parse JSON)
         post_stmt = (
             select(
                 table["post"].c.id,
@@ -503,9 +534,6 @@ async def get_posts_with_comments(
                 table["post"].c.description,
                 table["post"].c.created_date,
                 table["post"].c.last_modified_date,
-                table["resource"].c.id.label("image_id"),
-                table["resource"].c.directory.label("image_directory"),
-                table["resource"].c.filename.label("image_filename"),
                 table["account"].c.uuid.label("author_uuid"),
                 table["account"].c.email.label("author_email"),
                 table["user"].c.first_name.label("author_first_name"),
@@ -521,9 +549,6 @@ async def get_posts_with_comments(
                 .join(table["account"], table["post"].c.author == table["account"].c.id)
                 .outerjoin(
                     table["user"], table["user"].c.account_id == table["account"].c.id
-                )
-                .outerjoin(
-                    table["resource"], table["post"].c.image == table["resource"].c.id
                 )
                 .outerjoin(
                     profile_resource,
@@ -545,6 +570,30 @@ async def get_posts_with_comments(
         for row in posts_result:
             post_dict = dict(row._mapping)
             post_id = post_dict["id"]
+
+            # Parse image JSON to get resource IDs and fetch resource details
+            images = []
+            if post_dict["image"]:
+                try:
+                    resource_ids = json.loads(post_dict["image"])
+                    for res_id in resource_ids:
+                        res_stmt = select(
+                            table["resource"].c.id,
+                            table["resource"].c.directory,
+                            table["resource"].c.filename,
+                        ).where(table["resource"].c.id == res_id)
+                        res_result = session.execute(res_stmt).first()
+                        if res_result:
+                            res_data = res_result._mapping
+                            images.append(
+                                {
+                                    "id": res_data["id"],
+                                    "directory": res_data["directory"],
+                                    "filename": res_data["filename"],
+                                }
+                            )
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
             # Fetch total comments for this post
             comment_count_stmt = select(func.count(table["comment"].c.id)).where(
@@ -675,16 +724,8 @@ async def get_posts_with_comments(
             # Add total comments count to post
             post_dict["total_comments"] = total_comments
             post_dict["comments"] = comments
-            # Add image resource details to post (all fields)
-            post_dict["image"] = (
-                {
-                    "id": post_dict["image_id"],
-                    "directory": post_dict["image_directory"],
-                    "filename": post_dict["image_filename"],
-                }
-                if post_dict["image_id"]
-                else None
-            )
+            # Add images array instead of single image
+            post_dict["images"] = images
             # Add author details to post, including joined profile picture resource
             post_dict["author"] = {
                 "id": post_dict["author"],
@@ -704,9 +745,7 @@ async def get_posts_with_comments(
                 ),
             }
             # Remove raw resource and author fields from top-level
-            post_dict.pop("image_id", None)
-            post_dict.pop("image_directory", None)
-            post_dict.pop("image_filename", None)
+            post_dict.pop("image", None)
             post_dict.pop("author_uuid", None)
             post_dict.pop("author_email", None)
             post_dict.pop("author_first_name", None)
@@ -734,7 +773,7 @@ async def get_posts_with_comments(
 async def update_post(
     post_id: int = Path(..., description="The ID of the post to update"),
     description: str = Form(None),
-    image: UploadFile = File(None),
+    images: Optional[list[UploadFile]] = File(None),
     session_token: str = Cookie(None, alias="session_token"),
 ):
     session = db.session
@@ -753,8 +792,10 @@ async def update_post(
             raise HTTPException(status_code=404, detail="Account not found")
         account_id = account_row._mapping["id"]
 
-        # Check if post is owned by user
-        post_stmt = select(table["post"].c.author).where(table["post"].c.id == post_id)
+        # Check if post is owned by user and get existing images
+        post_stmt = select(table["post"].c.author, table["post"].c.image).where(
+            table["post"].c.id == post_id
+        )
         post = session.execute(post_stmt).fetchone()
         if not post or post.author != account_id:
             raise HTTPException(
@@ -765,9 +806,27 @@ async def update_post(
         update_values = {}
         if description is not None:
             update_values["description"] = description
-        if image is not None:
-            resource_id = add_resource(image, account_uuid)
-            update_values["image"] = resource_id
+        
+        if images is not None:
+            # Delete existing images
+            existing_images = post.image
+            if existing_images:
+                try:
+                    existing_resource_ids = json.loads(existing_images)
+                    for resource_id in existing_resource_ids:
+                        delete_resource(resource_id, account_uuid)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            
+            # Upload new images
+            resource_ids = []
+            for image in images:
+                if image.filename:  # Check if file was actually uploaded
+                    resource_id = add_resource(image, account_uuid)
+                    resource_ids.append(resource_id)
+            
+            # Store resource_ids as JSON string if not empty, else None
+            update_values["image"] = json.dumps(resource_ids) if resource_ids else None
 
         if not update_values:
             raise HTTPException(status_code=400, detail="No update fields provided")
@@ -827,10 +886,16 @@ async def delete_post(
                 status_code=404, detail="Post not found or not owned by user"
             )
 
-        # Delete associated resource if exists
-        resource_id = post.image
-        if resource_id:
-            delete_resource(resource_id, account_uuid)
+        # Delete associated resources if exists (multiple images)
+        images_field = post.image
+        if images_field:
+            try:
+                resource_ids = json.loads(images_field)
+                for resource_id in resource_ids:
+                    delete_resource(resource_id, account_uuid)
+            except (json.JSONDecodeError, TypeError):
+                # Handle case where it might be a single resource_id (legacy data)
+                pass
 
         # Delete post
         stmt = delete(table["post"]).where(
@@ -859,7 +924,7 @@ async def get_single_post(
 ):
     session = db.session
     try:
-        # Join post with account (author), user/org, and resource (post image)
+        # Join post with account (author), user/org, and resource (profile picture)
         profile_resource = table["resource"].alias("profile_resource")
         post_stmt = (
             select(
@@ -875,9 +940,6 @@ async def get_single_post(
                 table["user"].c.last_name.label("author_last_name"),
                 table["user"].c.bio.label("author_bio"),
                 table["user"].c.profile_picture.label("author_profile_picture"),
-                table["resource"].c.directory.label("image_directory"),
-                table["resource"].c.filename.label("image_filename"),
-                table["resource"].c.id.label("image_id"),
                 profile_resource.c.directory.label("author_profile_picture_directory"),
                 profile_resource.c.filename.label("author_profile_picture_filename"),
                 profile_resource.c.id.label("author_profile_picture_id"),
@@ -887,9 +949,6 @@ async def get_single_post(
                 .join(table["account"], table["post"].c.author == table["account"].c.id)
                 .outerjoin(
                     table["user"], table["user"].c.account_id == table["account"].c.id
-                )
-                .outerjoin(
-                    table["resource"], table["post"].c.image == table["resource"].c.id
                 )
                 .outerjoin(
                     profile_resource,
@@ -902,6 +961,31 @@ async def get_single_post(
         if not result:
             raise HTTPException(status_code=404, detail="Post not found")
         data = result._mapping
+
+        # Parse image JSON to get resource IDs and fetch resource details
+        images = []
+        if data["image"]:
+            try:
+                resource_ids = json.loads(data["image"])
+                for res_id in resource_ids:
+                    res_stmt = select(
+                        table["resource"].c.id,
+                        table["resource"].c.directory,
+                        table["resource"].c.filename,
+                    ).where(table["resource"].c.id == res_id)
+                    res_result = session.execute(res_stmt).first()
+                    if res_result:
+                        res_data = res_result._mapping
+                        images.append(
+                            {
+                                "id": res_data["id"],
+                                "directory": res_data["directory"],
+                                "filename": res_data["filename"],
+                            }
+                        )
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         post = {
             "id": data["id"],
             "description": data["description"],
@@ -924,15 +1008,7 @@ async def get_single_post(
                     else None
                 ),
             },
-            "image": (
-                {
-                    "id": data["image_id"],
-                    "directory": data["image_directory"],
-                    "filename": data["image_filename"],
-                }
-                if data["image_id"]
-                else None
-            ),
+            "images": images,
         }
         return post
     except SQLAlchemyError as e:
