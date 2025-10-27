@@ -21,6 +21,7 @@ from utils.address_utils import add_address, update_address
 from utils.resource_utils import add_resource
 from utils.session_utils import get_account_uuid_from_session
 from utils.profanity_filter import moderate_text
+from utils.notification_service import NotificationService
 
 
 router = APIRouter(
@@ -66,15 +67,20 @@ async def create_event(
     session_token: str = Cookie(None, alias="session_token"),
 ):
     session = db.session
+    notification_service = NotificationService()
+    
     try:
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
 
         account_uuid = get_account_uuid_from_session(session_token)
 
-        # Fetch organization id using account_uuid
+        # Fetch organization details using account_uuid
         select_organization = (
-            select(table["organization"].c.id)
+            select(
+                table["organization"].c.id,
+                table["organization"].c.name
+            )
             .select_from(
                 table["organization"].join(
                     table["account"],
@@ -83,9 +89,13 @@ async def create_event(
             )
             .where(table["account"].c.uuid == account_uuid)
         )
-        organization_id = session.execute(select_organization).scalar()
-        if organization_id is None:
+        org_result = session.execute(select_organization).first()
+        if org_result is None:
             raise HTTPException(status_code=404, detail="Organization not found")
+        
+        org_data = org_result._mapping
+        organization_id = org_data["id"]
+        organization_name = org_data["name"]
 
         # Moderate title for profanity and toxicity
         if title:
@@ -151,6 +161,20 @@ async def create_event(
         result = session.execute(stmt)
         session.commit()
         event_id = result.inserted_primary_key[0]
+
+        # Notify all organization members about the new event
+        try:
+            notification_service.notify_organization_members_new_event(
+                organization_id=organization_id,
+                event_id=event_id,
+                organization_name=organization_name,
+                event_title=title,
+                event_date=event_date,
+            )
+        except Exception as e:
+            # Log the error but don't fail the event creation
+            print(f"Error sending event notifications: {e}")
+
         return {"event_id": event_id, "message": "Event created successfully"}
     except IntegrityError as e:
         session.rollback()
@@ -161,6 +185,8 @@ async def create_event(
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        notification_service.close()
 
 
 @router.delete("/{event_id}", tags=["Delete Event"])

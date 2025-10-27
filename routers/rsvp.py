@@ -4,6 +4,7 @@ from sqlalchemy import insert, update, delete
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import Request
 from utils.session_utils import get_account_uuid_from_session
+from utils.notification_service import NotificationService
 
 
 router = APIRouter(
@@ -21,6 +22,8 @@ async def create_rsvp(
     event_id: int = Form(...),
     request: Request = None,
 ):
+    notification_service = NotificationService()
+    
     # Get session_token from cookie
     session_token = request.cookies.get("session_token")
     if not session_token:
@@ -39,12 +42,33 @@ async def create_rsvp(
         raise HTTPException(status_code=404, detail="Account not found")
     account_id = account.id
 
+    # Get user details for notification
+    user = session.query(table["user"]).filter_by(account_id=account_id).first()
+    user_name = f"{user.first_name} {user.last_name}" if user else account.email
+
+    # Get organization details for the event
+    organization = session.query(table["organization"]).filter_by(id=event.organization_id).first()
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found for event")
+
     stmt = insert(table["rsvp"]).values(
         event_id=event_id, attendee=account_id, status=status
     )
     try:
         session.execute(stmt)
         session.commit()
+        
+        # Notify organization about new RSVP request
+        try:
+            notification_service.notify_organization_new_rsvp_request(
+                organization_account_id=organization.account_id,
+                user_name=user_name,
+                event_id=event_id,
+                event_title=event.title,
+            )
+        except Exception as e:
+            print(f"Error sending RSVP request notification: {e}")
+        
         return {"message": "RSVP created successfully"}
     except IntegrityError:
         session.rollback()
@@ -57,6 +81,8 @@ async def create_rsvp(
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        notification_service.close()
 
 
 @router.get("/event/{event_id}", tags=["Get RSVPs for Event"])
@@ -208,6 +234,9 @@ async def update_rsvp_status(
     request: Request = None,
     status: str = Form(...),
 ):
+    session = db.session
+    notification_service = NotificationService()
+    
     try:
         # Get session_token from cookie
         session_token = request.cookies.get("session_token")
@@ -252,11 +281,21 @@ async def update_rsvp_status(
         )
         result = session.execute(stmt)
         session.commit()
+        
         if result.rowcount == 0:
             raise HTTPException(
                 status_code=404,
                 detail="RSVP not found or not owned by the Organization",
             )
+
+        # Send notification if RSVP was accepted (status changed to "joined")
+        if status == "joined":
+            notification_service.notify_rsvp_accepted(
+                user_account_id=rsvp.attendee,
+                event_id=event.id,
+                event_title=event.title,
+            )
+
         return {"message": "RSVP status updated successfully"}
     except SQLAlchemyError as e:
         session.rollback()
@@ -266,6 +305,7 @@ async def update_rsvp_status(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+        notification_service.close()
 
 
 @router.delete("/{rsvp_id}", tags=["Delete RSVP"])

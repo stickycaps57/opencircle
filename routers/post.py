@@ -19,6 +19,7 @@ from sqlalchemy import update, delete
 from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
 from utils.profanity_filter import moderate_text
+from utils.notification_service import NotificationService
 import json
 
 
@@ -39,6 +40,7 @@ async def create_post(
     images: Optional[list[UploadFile]] = File(None),
 ):
     session = db.session
+    notification_service = NotificationService()
 
     try:
         if not session_token:
@@ -46,13 +48,18 @@ async def create_post(
 
         account_uuid = get_account_uuid_from_session(session_token)
 
-        # Get account_id from account_uuid
-        select_stmt = select(table["account"].c.id).where(
-            table["account"].c.uuid == account_uuid
-        )
-        account_id = session.execute(select_stmt).scalar()
-        if account_id is None:
+        # Get account_id and role from account_uuid
+        select_stmt = select(
+            table["account"].c.id, 
+            table["account"].c.role_id
+        ).where(table["account"].c.uuid == account_uuid)
+        account_result = session.execute(select_stmt).first()
+        if account_result is None:
             raise HTTPException(status_code=404, detail="Account not found")
+        
+        account_data = account_result._mapping
+        account_id = account_data["id"]
+        role_id = account_data["role_id"]
 
         # Moderate description for profanity and toxicity
         if description:
@@ -86,8 +93,37 @@ async def create_post(
             image=images_field,
             description=description,
         )
-        session.execute(stmt)
+        result = session.execute(stmt)
         session.commit()
+        
+        # Get the post ID that was just created
+        post_id = result.lastrowid
+
+        # Check if this is an organization account and notify members
+        if role_id == 2:  # Assuming role_id 2 is organization based on schema
+            # Get organization details
+            org_stmt = select(
+                table["organization"].c.id,
+                table["organization"].c.name
+            ).where(table["organization"].c.account_id == account_id)
+            org_result = session.execute(org_stmt).first()
+            
+            if org_result:
+                org_data = org_result._mapping
+                organization_id = org_data["id"]
+                organization_name = org_data["name"]
+                
+                # Create a preview of the post description
+                post_preview = description[:100] if description else "New post from organization"
+                
+                # Notify all organization members about the new post
+                notification_service.notify_organization_members_new_post(
+                    organization_id=organization_id,
+                    post_id=post_id,
+                    organization_name=organization_name,
+                    post_preview=post_preview,
+                )
+
         return {"message": "Post created successfully"}
     except SQLAlchemyError as e:
         session.rollback()
@@ -97,6 +133,7 @@ async def create_post(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+        notification_service.close()
 
 
 @router.get("/all", tags=["Get All Posts with Comments"])

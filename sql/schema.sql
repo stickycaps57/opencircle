@@ -187,3 +187,21 @@ CREATE TABLE `shares` (
   KEY `shares_account_uuid_IDX` (`account_uuid`,`content_id`,`content_type`) USING BTREE,
   CONSTRAINT `shares_account_FK` FOREIGN KEY (`account_uuid`) REFERENCES `account` (`uuid`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+
+CREATE TABLE `notification` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `recipient_id` bigint(20) NOT NULL,
+  `type` enum('organization_membership_accepted','rsvp_accepted','new_post','event_update','new_membership_request','new_rsvp_request') NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `message` text NOT NULL,
+  `is_read` tinyint(1) NOT NULL DEFAULT 0,
+  `related_entity_id` bigint(20) DEFAULT NULL,
+  `related_entity_type` enum('organization','event','post','rsvp','user') DEFAULT NULL,
+  `created_date` datetime NOT NULL DEFAULT current_timestamp(),
+  `read_date` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `notification_recipient_FK` (`recipient_id`),
+  KEY `notification_recipient_read_IDX` (`recipient_id`,`is_read`) USING BTREE,
+  KEY `notification_created_date_IDX` (`created_date`) USING BTREE,
+  CONSTRAINT `notification_recipient_FK` FOREIGN KEY (`recipient_id`) REFERENCES `account` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;

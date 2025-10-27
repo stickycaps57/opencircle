@@ -6,6 +6,7 @@ from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
 from sqlalchemy import or_
 from sqlalchemy.sql import func
+from utils.notification_service import NotificationService
 
 router = APIRouter(
     prefix="/organization",
@@ -21,6 +22,8 @@ async def join_organization(
     session_token: str = Cookie(None, alias="session_token"),
 ):
     session = db.session
+    notification_service = NotificationService()
+    
     # Validate session token
     if not session_token:
         raise HTTPException(status_code=401, detail="Session token missing")
@@ -28,7 +31,7 @@ async def join_organization(
     # Get account_uuid from session
     account_uuid = get_account_uuid_from_session(session_token)
 
-    # Get user_id by joining user and account tables
+    # Get user details by joining user and account tables
     user = (
         session.query(table["user"])
         .join(table["account"], table["user"].c.account_id == table["account"].c.id)
@@ -38,8 +41,10 @@ async def join_organization(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user_id = user.id
+    user_name = f"{user.first_name} {user.last_name}"
+    user_account_id = user.account_id
 
-    # Check if organization exists
+    # Check if organization exists and get its account_id
     org = session.query(table["organization"]).filter_by(id=organization_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -65,6 +70,17 @@ async def join_organization(
                 )
                 session.execute(update_stmt)
                 session.commit()
+                
+                # Notify organization about resubmitted membership request
+                try:
+                    notification_service.notify_organization_new_membership_request(
+                        organization_account_id=org.account_id,
+                        user_name=user_name,
+                        user_account_id=user_account_id,
+                    )
+                except Exception as e:
+                    print(f"Error sending membership request notification: {e}")
+                
                 return {"message": "Membership request resubmitted"}
             except SQLAlchemyError as e:
                 session.rollback()
@@ -75,20 +91,6 @@ async def join_organization(
                 status_code=409, detail="Membership already exists or is pending"
             )
 
-    # Original implementation (commented out):
-    # stmt = insert(table["membership"]).values(
-    #     organization_id=organization_id, user_id=user_id, status="pending"
-    # )
-    # try:
-    #     session.execute(stmt)
-    #     session.commit()
-    #     return {"message": "Membership request submitted"}
-    # except IntegrityError:
-    #     session.rollback()
-    #     raise HTTPException(
-    #         status_code=409, detail="Membership already exists or is pending"
-    #     )
-
     # Insert new membership with pending status
     try:
         stmt = insert(table["membership"]).values(
@@ -96,6 +98,17 @@ async def join_organization(
         )
         session.execute(stmt)
         session.commit()
+        
+        # Notify organization about new membership request
+        try:
+            notification_service.notify_organization_new_membership_request(
+                organization_account_id=org.account_id,
+                user_name=user_name,
+                user_account_id=user_account_id,
+            )
+        except Exception as e:
+            print(f"Error sending membership request notification: {e}")
+        
         return {"message": "Membership request submitted"}
     except SQLAlchemyError as e:
         session.rollback()
@@ -105,6 +118,7 @@ async def join_organization(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+        notification_service.close()
 
 
 @router.post("/leave", tags=["Leave Organization"])
@@ -168,6 +182,8 @@ async def change_membership_status(
     session_token: str = Cookie(None, alias="session_token"),
 ):
     session = db.session
+    notification_service = NotificationService()
+    
     # Validate session token
     if not session_token:
         raise HTTPException(status_code=401, detail="Session token missing")
@@ -189,6 +205,14 @@ async def change_membership_status(
         if not org:
             raise HTTPException(status_code=404, detail="Organization not found")
         organization_id = org.id
+        organization_name = org.name
+
+        # Get user's account_id for notification
+        user_account = (
+            session.query(table["user"].c.account_id)
+            .filter(table["user"].c.id == user_id)
+            .first()
+        )
 
         stmt = (
             update(table["membership"])
@@ -202,6 +226,15 @@ async def change_membership_status(
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Membership not found")
         session.commit()
+
+        # Send notification if membership was approved
+        if status == "approved" and user_account:
+            notification_service.notify_organization_membership_accepted(
+                user_account_id=user_account.account_id,
+                organization_id=organization_id,
+                organization_name=organization_name,
+            )
+
         return {"message": "Membership status updated"}
     except SQLAlchemyError as e:
         session.rollback()
@@ -211,6 +244,7 @@ async def change_membership_status(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+        notification_service.close()
 
 
 @router.get("/memberships", tags=["Get User Memberships"])
