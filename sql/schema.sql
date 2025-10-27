@@ -176,3 +176,17 @@ insert
 	role (name)
 values ('user'),
 ('organization');
+
+-- opencircle.shares definition
+
+CREATE TABLE `shares` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `account_uuid` char(32) NOT NULL,
+  `content_id` bigint(20) NOT NULL,
+  `content_type` int(11) NOT NULL,
+  `comment` text DEFAULT NULL,
+  `date_created` datetime NOT NULL DEFAULT current_timestamp(),
+  `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `shares_account_uuid_IDX` (`account_uuid`,`content_id`,`content_type`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
