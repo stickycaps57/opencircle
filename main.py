@@ -14,6 +14,7 @@ from routers import (
     rsvp,
     comment,
     organization,
+    shares,
 )
 
 # app = FastAPI(dependencies=[Depends(get_query_token)])
@@ -26,6 +27,7 @@ app.include_router(event.router)
 app.include_router(rsvp.router)
 app.include_router(comment.router)
 app.include_router(organization.router)
+app.include_router(shares.router)
 
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
