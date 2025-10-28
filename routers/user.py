@@ -102,6 +102,7 @@ async def get_user_profile(
                 profile_resource.c.filename.label("profile_picture_filename"),
                 profile_resource.c.id.label("profile_picture_id"),
                 table["account"].c.id.label("account_id"),
+                table["account"].c.username,
             )
             .select_from(
                 table["user"]
@@ -332,6 +333,7 @@ async def get_user_profile(
         profile = {
             "first_name": user_data["first_name"],
             "last_name": user_data["last_name"],
+            "username": user_data["username"],
             "bio": user_data["bio"],
             "profile_picture": (
                 {
