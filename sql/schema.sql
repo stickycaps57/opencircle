@@ -30,10 +30,12 @@ CREATE TABLE `role` (
   UNIQUE KEY `name` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
+
 CREATE TABLE `account` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `uuid` char(32) NOT NULL,
   `email` varchar(255) NOT NULL,
+  `username` varchar(100) NOT NULL,
   `password` varchar(255) NOT NULL,
   `role_id` int(11) NOT NULL,
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
@@ -41,8 +43,10 @@ CREATE TABLE `account` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `account_email_IDX` (`email`) USING BTREE,
   UNIQUE KEY `account_uuid_IDX` (`uuid`) USING BTREE,
+  UNIQUE KEY `account_username` (`username`),
   KEY `role_id` (`role_id`),
   KEY `account_email_password_IDX` (`email`,`password`) USING BTREE,
+  KEY `account_username_IDX` (`username`,`password`) USING BTREE,
   CONSTRAINT `account_ibfk_1` FOREIGN KEY (`role_id`) REFERENCES `role` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 

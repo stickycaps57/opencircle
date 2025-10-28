@@ -13,7 +13,7 @@ from pydantic import EmailStr, constr
 from lib.database import Database
 from lib.models import UserModel, OrganizationModel
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, or_
 import uuid
 import bcrypt
 from utils.user_utils import create_user
@@ -49,6 +49,7 @@ async def create_user_account(
     bio: str = Form(None),
     profile_picture: UploadFile = File(...),
     email: EmailStr = Form(...),
+    username: constr(min_length=3) = Form(...),
     password: constr(min_length=8) = Form(...),
 ):
     # Generate a UUID for the account
@@ -62,6 +63,7 @@ async def create_user_account(
     stmt = insert(table["account"]).values(
         uuid=account_uuid,
         email=email,
+        username=username,
         password=hashed_password,
         role_id=1,
     )
@@ -87,7 +89,7 @@ async def create_user_account(
         return {"message": "Account created successfully", "uuid": account_uuid}
     except IntegrityError:
         session.rollback()
-        raise HTTPException(status_code=400, detail="Email already exists")
+        raise HTTPException(status_code=400, detail="Email or username already exists")
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -102,6 +104,7 @@ async def create_organization_account(
     category: str = Form(...),
     description: str = Form(None),
     email: EmailStr = Form(...),
+    username: constr(min_length=3) = Form(...),
     password: constr(min_length=8) = Form(...),
 ):
     # Generate a UUID for the account
@@ -115,6 +118,7 @@ async def create_organization_account(
     stmt = insert(table["account"]).values(
         uuid=account_uuid,
         email=email,
+        username=username,
         password=hashed_password,
         role_id=2,
     )
@@ -139,7 +143,7 @@ async def create_organization_account(
         return {"message": "Account created successfully", "uuid": account_uuid}
     except IntegrityError:
         session.rollback()
-        raise HTTPException(status_code=400, detail="Email already exists")
+        raise HTTPException(status_code=400, detail="Email or username already exists")
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -181,13 +185,18 @@ async def delete_account_by_uuid(
 
 @router.post("/user_signin", tags=["User Sign In"])
 async def user_sign_in(
-    email: EmailStr = Form(...),
+    login: str = Form(..., description="Email or username"),
     password: constr(min_length=8) = Form(...),
     request: Request = None,
     response: Response = None,
 ):
-    # Find account by email
-    stmt = select(table["account"]).where(table["account"].c.email == email)
+    # Find account by email or username
+    stmt = select(table["account"]).where(
+        or_(
+            table["account"].c.email == login,
+            table["account"].c.username == login
+        )
+    )
     account_result = session.execute(stmt).first()
     if not account_result:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -275,13 +284,18 @@ async def user_sign_in(
 
 @router.post("/organization_signin", tags=["Organization Sign In"])
 async def organization_sign_in(
-    email: EmailStr = Form(...),
+    login: str = Form(..., description="Email or username"),
     password: constr(min_length=8) = Form(...),
     request: Request = None,
     response: Response = None,
 ):
-    # Find account by email
-    stmt = select(table["account"]).where(table["account"].c.email == email)
+    # Find account by email or username
+    stmt = select(table["account"]).where(
+        or_(
+            table["account"].c.email == login,
+            table["account"].c.username == login
+        )
+    )
     account_result = session.execute(stmt).first()
     if not account_result:
         raise HTTPException(status_code=401, detail="Invalid credentials")
