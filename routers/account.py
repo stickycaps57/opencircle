@@ -13,11 +13,12 @@ from pydantic import EmailStr, constr
 from lib.database import Database
 from lib.models import UserModel, OrganizationModel
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy import insert, select, or_
+from sqlalchemy import insert, select, or_, update
 import uuid
 import bcrypt
 from utils.user_utils import create_user
 from utils.organization_utils import create_organization
+from utils.two_factor_auth import TwoFactorAuth
 import jwt
 import os
 from datetime import datetime, timedelta, timezone
@@ -208,6 +209,31 @@ async def user_sign_in(
     ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # Check if 2FA is enabled
+    if account["two_factor_enabled"]:
+        # Store account_uuid in a temporary session for 2FA verification
+        temp_session_details = add_session(
+            account_uuid=account["uuid"],
+            request=request,
+        )
+        temp_session_token = temp_session_details["session_token"]
+        
+        response.set_cookie(
+            key="temp_session_token",
+            value=temp_session_token,
+            httponly=True,
+            secure=False,
+            samesite="Lax",
+            path="/",
+            max_age=300,  # 5 minutes for 2FA verification
+        )
+        
+        return {
+            "requires_2fa": True,
+            "message": "2FA verification required. Please provide TOTP token or backup code.",
+            "account_type": "user"
+        }
+
     # Get user details linked to account, join resource for profile picture
     user_stmt = (
         select(
@@ -306,6 +332,31 @@ async def organization_sign_in(
         password.encode("utf-8"), account["password"].encode("utf-8")
     ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Check if 2FA is enabled
+    if account["two_factor_enabled"]:
+        # Store account_uuid in a temporary session for 2FA verification
+        temp_session_details = add_session(
+            account_uuid=account["uuid"],
+            request=request,
+        )
+        temp_session_token = temp_session_details["session_token"]
+        
+        response.set_cookie(
+            key="temp_session_token",
+            value=temp_session_token,
+            httponly=True,
+            secure=False,
+            samesite="Lax",
+            path="/",
+            max_age=300,  # 5 minutes for 2FA verification
+        )
+        
+        return {
+            "requires_2fa": True,
+            "message": "2FA verification required. Please provide TOTP token or backup code.",
+            "account_type": "organization"
+        }
 
     # Get organization details linked to account, join resource for logo
     org_stmt = (
@@ -534,6 +585,211 @@ async def get_current_user(session_token: str = Cookie(None)):
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.post("/verify_2fa", tags=["Verify 2FA"])
+async def verify_2fa(
+    totp_token: str = Form(..., description="6-digit TOTP token or backup code"),
+    account_type: str = Form(..., description="Account type: user or organization"),
+    temp_session_token: str = Cookie(None, alias="temp_session_token"),
+    request: Request = None,
+    response: Response = None,
+):
+    """
+    Verify 2FA token and complete login
+    """
+    if not temp_session_token:
+        raise HTTPException(status_code=401, detail="Temporary session token missing")
+    
+    # Get account_uuid from temporary session
+    account_uuid = get_account_uuid_from_session(temp_session_token)
+    if not account_uuid:
+        raise HTTPException(status_code=401, detail="Invalid temporary session token")
+    
+    try:
+        # Get account details
+        account_stmt = select(table["account"]).where(table["account"].c.uuid == account_uuid)
+        account_result = session.execute(account_stmt).first()
+        if not account_result:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        account = account_result._mapping
+        
+        # Verify that 2FA is enabled
+        if not account["two_factor_enabled"]:
+            raise HTTPException(status_code=400, detail="2FA is not enabled for this account")
+        
+        # Verify TOTP token or backup code
+        is_valid = False
+        updated_backup_codes = account["backup_codes"]
+        
+        if len(totp_token) == 6 and totp_token.isdigit():
+            # Verify TOTP token
+            is_valid = TwoFactorAuth.verify_totp(account["totp_secret"], totp_token)
+        else:
+            # Try backup code
+            is_valid, updated_backup_codes = TwoFactorAuth.verify_backup_code(
+                account["backup_codes"], totp_token
+            )
+            
+            # Update backup codes if one was used
+            if is_valid and updated_backup_codes != account["backup_codes"]:
+                update_stmt = (
+                    update(table["account"])
+                    .where(table["account"].c.uuid == account_uuid)
+                    .values(backup_codes=updated_backup_codes)
+                )
+                session.execute(update_stmt)
+                session.commit()
+        
+        if not is_valid:
+            raise HTTPException(status_code=400, detail="Invalid TOTP token or backup code")
+        
+        # Delete temporary session
+        delete_session(temp_session_token)
+        response.delete_cookie(key="temp_session_token", path="/")
+        
+        # Create new permanent session
+        session_details = add_session(
+            account_uuid=account["uuid"],
+            request=request,
+        )
+        session_token = session_details["session_token"]
+        expires_at = session_details["expires_at"]
+        
+        response.set_cookie(
+            key="session_token",
+            value=session_token,
+            httponly=True,
+            secure=False,
+            samesite="Lax",
+            path="/",
+            expires=expires_at,
+        )
+        
+        # Return appropriate account details based on type
+        if account_type == "user":
+            # Get user details
+            user_stmt = (
+                select(
+                    table["user"].c.id,
+                    table["user"].c.account_id,
+                    table["user"].c.first_name,
+                    table["user"].c.last_name,
+                    table["user"].c.bio,
+                    table["account"].c.email,
+                    table["user"].c.profile_picture,
+                    table["resource"].c.directory.label("profile_picture_directory"),
+                    table["resource"].c.filename.label("profile_picture_filename"),
+                )
+                .select_from(
+                    table["user"]
+                    .join(
+                        table["account"],
+                        table["user"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["resource"],
+                        table["user"].c.profile_picture == table["resource"].c.id,
+                    )
+                )
+                .where(table["user"].c.account_id == account["id"])
+            )
+            user_result = session.execute(user_stmt).first()
+            if not user_result:
+                raise HTTPException(status_code=404, detail="User not found for this account")
+            user = user_result._mapping
+            
+            return {
+                "user": {
+                    "id": user["id"],
+                    "account_id": user["account_id"],
+                    "first_name": user["first_name"],
+                    "last_name": user["last_name"],
+                    "bio": user["bio"],
+                    "email": account["email"],
+                    "profile_picture": (
+                        {
+                            "id": user["profile_picture"],
+                            "directory": user["profile_picture_directory"],
+                            "filename": user["profile_picture_filename"],
+                        }
+                        if user["profile_picture"]
+                        else None
+                    ),
+                    "uuid": account["uuid"],
+                    "role_id": account["role_id"],
+                },
+                "expires_at": expires_at.isoformat(),
+            }
+            
+        elif account_type == "organization":
+            # Get organization details
+            org_stmt = (
+                select(
+                    table["organization"].c.id,
+                    table["organization"].c.account_id,
+                    table["organization"].c.name,
+                    table["organization"].c.logo,
+                    table["organization"].c.category,
+                    table["organization"].c.description,
+                    table["account"].c.email,
+                    table["resource"].c.directory.label("logo_directory"),
+                    table["resource"].c.filename.label("logo_filename"),
+                )
+                .select_from(
+                    table["organization"]
+                    .join(
+                        table["account"],
+                        table["organization"].c.account_id == table["account"].c.id,
+                    )
+                    .outerjoin(
+                        table["resource"],
+                        table["organization"].c.logo == table["resource"].c.id,
+                    )
+                )
+                .where(table["organization"].c.account_id == account["id"])
+            )
+            org_result = session.execute(org_stmt).first()
+            if not org_result:
+                raise HTTPException(
+                    status_code=404, detail="Organization not found for this account"
+                )
+            organization = org_result._mapping
+            
+            return {
+                "organization": {
+                    "id": organization["id"],
+                    "account_id": organization["account_id"],
+                    "name": organization["name"],
+                    "email": account["email"],
+                    "logo": (
+                        {
+                            "id": organization["logo"],
+                            "directory": organization["logo_directory"],
+                            "filename": organization["logo_filename"],
+                        }
+                        if organization["logo"]
+                        else None
+                    ),
+                    "category": organization["category"],
+                    "description": organization["description"],
+                    "uuid": account["uuid"],
+                    "role_id": account["role_id"],
+                },
+                "expires_at": expires_at.isoformat(),
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Invalid account type")
+            
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
