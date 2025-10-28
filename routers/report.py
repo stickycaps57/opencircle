@@ -701,3 +701,497 @@ async def get_membership_details(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+
+@router.get("/comment-analytics/posts", tags=["reports"])
+async def get_post_comment_analytics(
+    session_token: str = Cookie(None, alias="session_token"),
+    start_date: Optional[datetime] = Query(None, description="Start date for filtering (YYYY-MM-DD HH:MM:SS)"),
+    end_date: Optional[datetime] = Query(None, description="End date for filtering (YYYY-MM-DD HH:MM:SS)")
+):
+    """
+    Get comment analytics for all posts owned by the organization.
+    Returns the total number of comments on organization's posts with date filtering using comment created_date.
+    """
+    session = db.session
+    
+    # Validate session token
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+
+    # Get account_uuid from session
+    account_uuid = get_account_uuid_from_session(session_token)
+
+    try:
+        # Get organization details from account
+        org = (
+            session.query(table["organization"])
+            .join(
+                table["account"],
+                table["organization"].c.account_id == table["account"].c.id,
+            )
+            .filter(table["account"].c.uuid == account_uuid)
+            .first()
+        )
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        organization_id = org.id
+
+        # Build date filter conditions for comments
+        comment_conditions = []
+        if start_date:
+            comment_conditions.append(table["comment"].c.created_date >= start_date)
+        if end_date:
+            comment_conditions.append(table["comment"].c.created_date <= end_date)
+
+        # Get posts with comment analytics
+        posts_query = (
+            select(
+                table["post"].c.id.label("post_id"),
+                table["post"].c.description.label("post_description"),
+                table["post"].c.created_date.label("post_created_date"),
+                func.count(table["comment"].c.id).label("comment_count"),
+                func.min(table["comment"].c.created_date).label("first_comment_date"),
+                func.max(table["comment"].c.created_date).label("last_comment_date")
+            )
+            .select_from(
+                table["post"]
+                .outerjoin(
+                    table["comment"],
+                    and_(
+                        table["post"].c.id == table["comment"].c.post_id,
+                        *comment_conditions
+                    )
+                )
+            )
+            .where(table["post"].c.author == organization_id)
+            .group_by(
+                table["post"].c.id,
+                table["post"].c.description,
+                table["post"].c.created_date
+            )
+            .order_by(table["post"].c.created_date.desc())
+        )
+
+        results = session.execute(posts_query).fetchall()
+
+        # Calculate totals
+        total_posts = len(results)
+        total_comments = sum(row.comment_count for row in results)
+        posts_with_comments = sum(1 for row in results if row.comment_count > 0)
+
+        # Format response
+        post_analytics = []
+        for row in results:
+            row_dict = row._mapping
+            post_analytics.append({
+                "post_id": row_dict["post_id"],
+                "post_description": row_dict["post_description"][:100] + "..." if len(row_dict["post_description"]) > 100 else row_dict["post_description"],
+                "post_created_date": row_dict["post_created_date"],
+                "comment_count": row_dict["comment_count"],
+                "first_comment_date": row_dict["first_comment_date"],
+                "last_comment_date": row_dict["last_comment_date"]
+            })
+
+        return {
+            "organization_id": organization_id,
+            "organization_name": org.name,
+            "filters": {
+                "start_date": start_date,
+                "end_date": end_date
+            },
+            "summary": {
+                "total_posts": total_posts,
+                "total_comments": total_comments,
+                "posts_with_comments": posts_with_comments,
+                "posts_without_comments": total_posts - posts_with_comments,
+                "average_comments_per_post": round(total_comments / total_posts, 2) if total_posts > 0 else 0
+            },
+            "post_analytics": post_analytics
+        }
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.get("/comment-analytics/events", tags=["reports"])
+async def get_event_comment_analytics(
+    session_token: str = Cookie(None, alias="session_token"),
+    start_date: Optional[datetime] = Query(None, description="Start date for filtering (YYYY-MM-DD HH:MM:SS)"),
+    end_date: Optional[datetime] = Query(None, description="End date for filtering (YYYY-MM-DD HH:MM:SS)")
+):
+    """
+    Get comment analytics for all events owned by the organization.
+    Returns the total number of comments on organization's events with date filtering using comment created_date.
+    """
+    session = db.session
+    
+    # Validate session token
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+
+    # Get account_uuid from session
+    account_uuid = get_account_uuid_from_session(session_token)
+
+    try:
+        # Get organization details from account
+        org = (
+            session.query(table["organization"])
+            .join(
+                table["account"],
+                table["organization"].c.account_id == table["account"].c.id,
+            )
+            .filter(table["account"].c.uuid == account_uuid)
+            .first()
+        )
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        organization_id = org.id
+
+        # Build date filter conditions for comments
+        comment_conditions = []
+        if start_date:
+            comment_conditions.append(table["comment"].c.created_date >= start_date)
+        if end_date:
+            comment_conditions.append(table["comment"].c.created_date <= end_date)
+
+        # Get events with comment analytics
+        events_query = (
+            select(
+                table["event"].c.id.label("event_id"),
+                table["event"].c.title.label("event_title"),
+                table["event"].c.event_date,
+                table["event"].c.created_date.label("event_created_date"),
+                func.count(table["comment"].c.id).label("comment_count"),
+                func.min(table["comment"].c.created_date).label("first_comment_date"),
+                func.max(table["comment"].c.created_date).label("last_comment_date")
+            )
+            .select_from(
+                table["event"]
+                .outerjoin(
+                    table["comment"],
+                    and_(
+                        table["event"].c.id == table["comment"].c.event_id,
+                        *comment_conditions
+                    )
+                )
+            )
+            .where(table["event"].c.organization_id == organization_id)
+            .group_by(
+                table["event"].c.id,
+                table["event"].c.title,
+                table["event"].c.event_date,
+                table["event"].c.created_date
+            )
+            .order_by(table["event"].c.event_date.desc())
+        )
+
+        results = session.execute(events_query).fetchall()
+
+        # Calculate totals
+        total_events = len(results)
+        total_comments = sum(row.comment_count for row in results)
+        events_with_comments = sum(1 for row in results if row.comment_count > 0)
+
+        # Format response
+        event_analytics = []
+        for row in results:
+            row_dict = row._mapping
+            event_analytics.append({
+                "event_id": row_dict["event_id"],
+                "event_title": row_dict["event_title"],
+                "event_date": row_dict["event_date"],
+                "event_created_date": row_dict["event_created_date"],
+                "comment_count": row_dict["comment_count"],
+                "first_comment_date": row_dict["first_comment_date"],
+                "last_comment_date": row_dict["last_comment_date"]
+            })
+
+        return {
+            "organization_id": organization_id,
+            "organization_name": org.name,
+            "filters": {
+                "start_date": start_date,
+                "end_date": end_date
+            },
+            "summary": {
+                "total_events": total_events,
+                "total_comments": total_comments,
+                "events_with_comments": events_with_comments,
+                "events_without_comments": total_events - events_with_comments,
+                "average_comments_per_event": round(total_comments / total_events, 2) if total_events > 0 else 0
+            },
+            "event_analytics": event_analytics
+        }
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.get("/comment-analytics/summary", tags=["reports"])
+async def get_comment_analytics_summary(
+    session_token: str = Cookie(None, alias="session_token"),
+    start_date: Optional[datetime] = Query(None, description="Start date for filtering (YYYY-MM-DD HH:MM:SS)"),
+    end_date: Optional[datetime] = Query(None, description="End date for filtering (YYYY-MM-DD HH:MM:SS)")
+):
+    """
+    Get a comprehensive summary of comment analytics for both posts and events owned by the organization.
+    Returns aggregated statistics with date filtering using comment created_date.
+    """
+    session = db.session
+    
+    # Validate session token
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+
+    # Get account_uuid from session
+    account_uuid = get_account_uuid_from_session(session_token)
+
+    try:
+        # Get organization details from account
+        org = (
+            session.query(table["organization"])
+            .join(
+                table["account"],
+                table["organization"].c.account_id == table["account"].c.id,
+            )
+            .filter(table["account"].c.uuid == account_uuid)
+            .first()
+        )
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        organization_id = org.id
+
+        # Build date filter conditions for comments
+        comment_conditions = []
+        if start_date:
+            comment_conditions.append(table["comment"].c.created_date >= start_date)
+        if end_date:
+            comment_conditions.append(table["comment"].c.created_date <= end_date)
+
+        # Get post comment summary
+        post_summary_query = (
+            select(
+                func.count(func.distinct(table["post"].c.id)).label("total_posts"),
+                func.count(table["comment"].c.id).label("total_post_comments")
+            )
+            .select_from(
+                table["post"]
+                .outerjoin(
+                    table["comment"],
+                    and_(
+                        table["post"].c.id == table["comment"].c.post_id,
+                        *comment_conditions
+                    )
+                )
+            )
+            .where(table["post"].c.author == organization_id)
+        )
+
+        # Get posts with comments count separately
+        posts_with_comments_query = (
+            select(
+                func.count(func.distinct(table["post"].c.id)).label("posts_with_comments")
+            )
+            .select_from(
+                table["post"]
+                .join(
+                    table["comment"],
+                    and_(
+                        table["post"].c.id == table["comment"].c.post_id,
+                        *comment_conditions
+                    )
+                )
+            )
+            .where(table["post"].c.author == organization_id)
+        )
+
+        post_result = session.execute(post_summary_query).fetchone()
+        posts_with_comments_result = session.execute(posts_with_comments_query).fetchone()
+
+        # Get event comment summary
+        event_summary_query = (
+            select(
+                func.count(func.distinct(table["event"].c.id)).label("total_events"),
+                func.count(table["comment"].c.id).label("total_event_comments")
+            )
+            .select_from(
+                table["event"]
+                .outerjoin(
+                    table["comment"],
+                    and_(
+                        table["event"].c.id == table["comment"].c.event_id,
+                        *comment_conditions
+                    )
+                )
+            )
+            .where(table["event"].c.organization_id == organization_id)
+        )
+
+        # Get events with comments count separately
+        events_with_comments_query = (
+            select(
+                func.count(func.distinct(table["event"].c.id)).label("events_with_comments")
+            )
+            .select_from(
+                table["event"]
+                .join(
+                    table["comment"],
+                    and_(
+                        table["event"].c.id == table["comment"].c.event_id,
+                        *comment_conditions
+                    )
+                )
+            )
+            .where(table["event"].c.organization_id == organization_id)
+        )
+
+        event_result = session.execute(event_summary_query).fetchone()
+        events_with_comments_result = session.execute(events_with_comments_query).fetchone()
+
+        # Get daily comment trends (limited to 30 days)
+        from datetime import timedelta
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        
+        trends_conditions = comment_conditions.copy()
+        trends_conditions.append(table["comment"].c.created_date >= thirty_days_ago)
+
+        # Separate queries for post and event comments in trends
+        post_trends_query = (
+            select(
+                func.date(table["comment"].c.created_date).label("comment_date"),
+                func.count(table["comment"].c.id).label("post_comments")
+            )
+            .select_from(
+                table["comment"]
+                .join(table["post"], table["comment"].c.post_id == table["post"].c.id)
+            )
+            .where(
+                and_(
+                    table["post"].c.author == organization_id,
+                    *trends_conditions
+                )
+            )
+            .group_by(func.date(table["comment"].c.created_date))
+        )
+
+        event_trends_query = (
+            select(
+                func.date(table["comment"].c.created_date).label("comment_date"),
+                func.count(table["comment"].c.id).label("event_comments")
+            )
+            .select_from(
+                table["comment"]
+                .join(table["event"], table["comment"].c.event_id == table["event"].c.id)
+            )
+            .where(
+                and_(
+                    table["event"].c.organization_id == organization_id,
+                    *trends_conditions
+                )
+            )
+            .group_by(func.date(table["comment"].c.created_date))
+        )
+
+        post_trends_results = session.execute(post_trends_query).fetchall()
+        event_trends_results = session.execute(event_trends_query).fetchall()
+
+        # Combine trends data
+        trends_data = {}
+        for row in post_trends_results:
+            row_dict = row._mapping
+            date_key = row_dict["comment_date"]
+            if date_key not in trends_data:
+                trends_data[date_key] = {"post_comments": 0, "event_comments": 0}
+            trends_data[date_key]["post_comments"] = row_dict["post_comments"]
+
+        for row in event_trends_results:
+            row_dict = row._mapping
+            date_key = row_dict["comment_date"]
+            if date_key not in trends_data:
+                trends_data[date_key] = {"post_comments": 0, "event_comments": 0}
+            trends_data[date_key]["event_comments"] = row_dict["event_comments"]
+
+        # Calculate totals
+        post_dict = post_result._mapping
+        event_dict = event_result._mapping
+        posts_with_comments_dict = posts_with_comments_result._mapping
+        events_with_comments_dict = events_with_comments_result._mapping
+
+        total_posts = post_dict["total_posts"] or 0
+        total_post_comments = post_dict["total_post_comments"] or 0
+        posts_with_comments = posts_with_comments_dict["posts_with_comments"] or 0
+
+        total_events = event_dict["total_events"] or 0
+        total_event_comments = event_dict["total_event_comments"] or 0
+        events_with_comments = events_with_comments_dict["events_with_comments"] or 0
+
+        total_comments = total_post_comments + total_event_comments
+        total_content = total_posts + total_events
+        content_with_comments = posts_with_comments + events_with_comments
+
+        # Format daily trends
+        daily_trends = []
+        for date_key in sorted(trends_data.keys(), reverse=True)[:30]:
+            daily_trends.append({
+                "date": date_key,
+                "post_comments": trends_data[date_key]["post_comments"],
+                "event_comments": trends_data[date_key]["event_comments"],
+                "total_comments": trends_data[date_key]["post_comments"] + trends_data[date_key]["event_comments"]
+            })
+
+        return {
+            "organization_id": organization_id,
+            "organization_name": org.name,
+            "filters": {
+                "start_date": start_date,
+                "end_date": end_date
+            },
+            "overall_summary": {
+                "total_content_items": total_content,
+                "total_comments": total_comments,
+                "content_with_comments": content_with_comments,
+                "content_without_comments": total_content - content_with_comments,
+                "average_comments_per_content": round(total_comments / total_content, 2) if total_content > 0 else 0,
+                "comment_engagement_rate": round((content_with_comments / total_content) * 100, 2) if total_content > 0 else 0
+            },
+            "post_summary": {
+                "total_posts": total_posts,
+                "total_post_comments": total_post_comments,
+                "posts_with_comments": posts_with_comments,
+                "posts_without_comments": total_posts - posts_with_comments,
+                "average_comments_per_post": round(total_post_comments / total_posts, 2) if total_posts > 0 else 0
+            },
+            "event_summary": {
+                "total_events": total_events,
+                "total_event_comments": total_event_comments,
+                "events_with_comments": events_with_comments,
+                "events_without_comments": total_events - events_with_comments,
+                "average_comments_per_event": round(total_event_comments / total_events, 2) if total_events > 0 else 0
+            },
+            "daily_trends": daily_trends
+        }
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
