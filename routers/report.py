@@ -415,3 +415,289 @@ async def get_event_respondents_details(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+
+@router.get("/membership-analytics", tags=["Membership Analytics"])
+async def get_membership_analytics(
+    session_token: str = Cookie(None, alias="session_token"),
+    start_date: Optional[datetime] = Query(None, description="Filter memberships modified after this date (YYYY-MM-DD HH:MM:SS)"),
+    end_date: Optional[datetime] = Query(None, description="Filter memberships modified before this date (YYYY-MM-DD HH:MM:SS)"),
+    status_filter: Optional[str] = Query(None, description="Filter by membership status: pending, approved, rejected, left"),
+):
+    """
+    Get membership analytics for the organization.
+    Returns counts of pending, approved, rejected, and left memberships.
+    Supports date filtering based on membership last_modified_date.
+    """
+    session = db.session
+    
+    # Validate session token
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+
+    # Get account_uuid from session
+    account_uuid = get_account_uuid_from_session(session_token)
+
+    try:
+        # Get organization details from account
+        org = (
+            session.query(table["organization"])
+            .join(
+                table["account"],
+                table["organization"].c.account_id == table["account"].c.id,
+            )
+            .filter(table["account"].c.uuid == account_uuid)
+            .first()
+        )
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        organization_id = org.id
+
+        # Build conditions for membership filtering
+        membership_conditions = [
+            table["membership"].c.organization_id == organization_id
+        ]
+        
+        if start_date:
+            membership_conditions.append(table["membership"].c.last_modified_date >= start_date)
+        if end_date:
+            membership_conditions.append(table["membership"].c.last_modified_date <= end_date)
+        if status_filter and status_filter in ['pending', 'approved', 'rejected', 'left']:
+            membership_conditions.append(table["membership"].c.status == status_filter)
+
+        # Get membership counts by status
+        membership_stats_query = (
+            select(
+                table["membership"].c.status,
+                func.count(table["membership"].c.id).label("count")
+            )
+            .where(and_(*membership_conditions))
+            .group_by(table["membership"].c.status)
+        )
+        
+        membership_stats_result = session.execute(membership_stats_query).fetchall()
+        
+        # Initialize membership stats
+        membership_stats = {
+            "pending": 0,
+            "approved": 0,
+            "rejected": 0,
+            "left": 0,
+            "total": 0
+        }
+        
+        # Populate actual counts
+        for stat in membership_stats_result:
+            stat_dict = stat._mapping
+            membership_stats[stat_dict["status"]] = stat_dict["count"]
+            membership_stats["total"] += stat_dict["count"]
+        
+        # Calculate percentages
+        total = membership_stats["total"]
+        percentages = {
+            "pending_percentage": round((membership_stats["pending"] / max(total, 1)) * 100, 2),
+            "approved_percentage": round((membership_stats["approved"] / max(total, 1)) * 100, 2),
+            "rejected_percentage": round((membership_stats["rejected"] / max(total, 1)) * 100, 2),
+            "left_percentage": round((membership_stats["left"] / max(total, 1)) * 100, 2)
+        }
+
+        # Get active members count (approved status only)
+        active_members_query = (
+            select(func.count(table["membership"].c.id))
+            .where(
+                table["membership"].c.organization_id == organization_id,
+                table["membership"].c.status == "approved"
+            )
+        )
+        active_members_count = session.execute(active_members_query).scalar() or 0
+
+        # Get membership applications in the last 30 days (for trend analysis)
+        from datetime import timedelta
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        
+        recent_applications_query = (
+            select(func.count(table["membership"].c.id))
+            .where(
+                table["membership"].c.organization_id == organization_id,
+                table["membership"].c.created_date >= thirty_days_ago
+            )
+        )
+        recent_applications = session.execute(recent_applications_query).scalar() or 0
+
+        # Get retention rate (approved vs left)
+        total_ever_approved_query = (
+            select(func.count(table["membership"].c.id))
+            .where(
+                table["membership"].c.organization_id == organization_id,
+                table["membership"].c.status.in_(["approved", "left"])
+            )
+        )
+        total_ever_approved = session.execute(total_ever_approved_query).scalar() or 0
+        
+        retention_rate = round((active_members_count / max(total_ever_approved, 1)) * 100, 2) if total_ever_approved > 0 else 0
+
+        return {
+            "organization_id": organization_id,
+            "organization_name": org.name,
+            "date_filter": {
+                "start_date": start_date,
+                "end_date": end_date,
+                "status_filter": status_filter
+            },
+            "membership_analytics": {
+                "status_counts": membership_stats,
+                "status_percentages": percentages,
+                "active_members": active_members_count,
+                "recent_applications_30_days": recent_applications,
+                "retention_rate_percentage": retention_rate,
+                "conversion_rate_percentage": round((membership_stats["approved"] / max(membership_stats["total"], 1)) * 100, 2) if membership_stats["total"] > 0 else 0
+            }
+        }
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.get("/membership-details", tags=["Membership Analytics"])
+async def get_membership_details(
+    session_token: str = Cookie(None, alias="session_token"),
+    status_filter: Optional[str] = Query(None, description="Filter by membership status: pending, approved, rejected, left"),
+    start_date: Optional[datetime] = Query(None, description="Filter memberships modified after this date (YYYY-MM-DD HH:MM:SS)"),
+    end_date: Optional[datetime] = Query(None, description="Filter memberships modified before this date (YYYY-MM-DD HH:MM:SS)"),
+    limit: Optional[int] = Query(100, description="Maximum number of records to return (default: 100)"),
+):
+    """
+    Get detailed membership information for the organization.
+    Returns individual membership records with user details.
+    """
+    session = db.session
+    
+    # Validate session token
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+
+    # Get account_uuid from session
+    account_uuid = get_account_uuid_from_session(session_token)
+
+    try:
+        # Get organization details from account
+        org = (
+            session.query(table["organization"])
+            .join(
+                table["account"],
+                table["organization"].c.account_id == table["account"].c.id,
+            )
+            .filter(table["account"].c.uuid == account_uuid)
+            .first()
+        )
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        organization_id = org.id
+
+        # Build conditions for membership filtering
+        membership_conditions = [
+            table["membership"].c.organization_id == organization_id
+        ]
+        
+        if start_date:
+            membership_conditions.append(table["membership"].c.last_modified_date >= start_date)
+        if end_date:
+            membership_conditions.append(table["membership"].c.last_modified_date <= end_date)
+        if status_filter and status_filter in ['pending', 'approved', 'rejected', 'left']:
+            membership_conditions.append(table["membership"].c.status == status_filter)
+
+        # Get detailed membership information with user details
+        membership_details_query = (
+            select(
+                table["membership"].c.id.label("membership_id"),
+                table["membership"].c.status,
+                table["membership"].c.created_date.label("membership_created_date"),
+                table["membership"].c.last_modified_date.label("membership_modified_date"),
+                table["user"].c.id.label("user_id"),
+                table["user"].c.first_name,
+                table["user"].c.last_name,
+                table["user"].c.bio,
+                table["user"].c.profile_picture,
+                table["account"].c.id.label("account_id"),
+                table["account"].c.uuid.label("account_uuid"),
+                table["account"].c.email,
+                table["account"].c.username,
+                table["resource"].c.directory.label("profile_picture_directory"),
+                table["resource"].c.filename.label("profile_picture_filename"),
+            )
+            .select_from(
+                table["membership"]
+                .join(table["user"], table["membership"].c.user_id == table["user"].c.id)
+                .join(table["account"], table["user"].c.account_id == table["account"].c.id)
+                .outerjoin(table["resource"], table["user"].c.profile_picture == table["resource"].c.id)
+            )
+            .where(and_(*membership_conditions))
+            .order_by(table["membership"].c.last_modified_date.desc())
+            .limit(limit)
+        )
+        
+        membership_details_result = session.execute(membership_details_query).fetchall()
+        
+        members = []
+        for membership in membership_details_result:
+            membership_dict = membership._mapping
+            
+            members.append({
+                "membership_id": membership_dict["membership_id"],
+                "status": membership_dict["status"],
+                "membership_created_date": membership_dict["membership_created_date"],
+                "membership_modified_date": membership_dict["membership_modified_date"],
+                "member": {
+                    "user_id": membership_dict["user_id"],
+                    "account_id": membership_dict["account_id"],
+                    "account_uuid": membership_dict["account_uuid"],
+                    "email": membership_dict["email"],
+                    "username": membership_dict["username"],
+                    "first_name": membership_dict["first_name"],
+                    "last_name": membership_dict["last_name"],
+                    "bio": membership_dict["bio"],
+                    "profile_picture": {
+                        "id": membership_dict["profile_picture"],
+                        "directory": membership_dict["profile_picture_directory"],
+                        "filename": membership_dict["profile_picture_filename"],
+                    } if membership_dict["profile_picture"] else None
+                }
+            })
+
+        # Get total count for pagination info
+        total_count_query = (
+            select(func.count(table["membership"].c.id))
+            .where(and_(*membership_conditions))
+        )
+        total_count = session.execute(total_count_query).scalar() or 0
+
+        return {
+            "organization_id": organization_id,
+            "organization_name": org.name,
+            "filters": {
+                "status_filter": status_filter,
+                "start_date": start_date,
+                "end_date": end_date,
+                "limit": limit
+            },
+            "total_members": total_count,
+            "returned_members": len(members),
+            "members": members
+        }
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
