@@ -717,6 +717,7 @@ async def get_organization_members(organization_id: int):
                 if org.logo_id
                 else None
             ),
+            "member_count": len(members),
             "members": members,
         }
     except SQLAlchemyError as e:
