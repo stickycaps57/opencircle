@@ -3455,6 +3455,14 @@ async def get_event_by_id(
         event_data.pop("address_city_code", None)
         event_data.pop("address_barangay_code", None)
 
+        # Count members who have joined this event
+        members_count_stmt = select(func.count(table["rsvp"].c.id)).where(
+            (table["rsvp"].c.event_id == event_id)
+            & (table["rsvp"].c.status == "joined")
+        )
+        total_members = session.execute(members_count_stmt).scalar() or 0
+        event_data["total_members"] = total_members
+
         return event_data
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
