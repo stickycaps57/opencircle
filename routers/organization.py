@@ -175,6 +175,82 @@ async def leave_organization(
         session.close()
 
 
+@router.post("/leave-organization", tags=["Leave Organization"])
+async def leave_organization_status(
+    organization_id: int = Form(...),
+    session_token: str = Cookie(None, alias="session_token"),
+):
+    """
+    Leave an organization by setting membership status to 'left'.
+    This preserves the membership record for historical purposes.
+    """
+    session = db.session
+    
+    # Validate session token
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+
+    # Get account_uuid from session
+    account_uuid = get_account_uuid_from_session(session_token)
+
+    # Get user_id by joining user and account tables
+    user = (
+        session.query(table["user"])
+        .join(table["account"], table["user"].c.account_id == table["account"].c.id)
+        .filter(table["account"].c.uuid == account_uuid)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user_id = user.id
+
+    # Check if organization exists
+    org = session.query(table["organization"]).filter_by(id=organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    # Check if membership exists and is currently active (approved)
+    existing_membership = (
+        session.query(table["membership"])
+        .filter_by(organization_id=organization_id, user_id=user_id)
+        .first()
+    )
+    
+    if not existing_membership:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    
+    if existing_membership.status != "approved":
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot leave organization. Current membership status is '{existing_membership.status}'"
+        )
+
+    # Update membership status to 'left'
+    try:
+        stmt = (
+            update(table["membership"])
+            .where(
+                table["membership"].c.organization_id == organization_id,
+                table["membership"].c.user_id == user_id,
+            )
+            .values(status="left")
+        )
+        result = session.execute(stmt)
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Membership not found")
+        
+        session.commit()
+        return {"message": "Successfully left organization"}
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
 @router.put("/membership/status", tags=["Change Membership Status"])
 async def change_membership_status(
     user_id: int = Form(...),
@@ -1221,3 +1297,5 @@ async def get_organization_profile(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+
