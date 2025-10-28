@@ -889,13 +889,13 @@ async def get_organization_by_id(organization_id: int = Path(...)):
             )
             .where(table["organization"].c.id == organization_id)
         )
-        
+
         org_result = session.execute(org_stmt).first()
         if not org_result:
             raise HTTPException(status_code=404, detail="Organization not found")
-        
+
         organization = org_result._mapping
-        
+
         # Return organization details in the same format as in account.py
         return {
             "id": organization["id"],
@@ -918,6 +918,304 @@ async def get_organization_by_id(organization_id: int = Path(...)):
         }
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.get("/profile/{account_uuid}", tags=["Get Organization Profile"])
+async def get_organization_profile(
+    account_uuid: str = Path(..., description="The UUID of the organization's account"),
+    session_token: str = Cookie(...),
+):
+    session = db.session
+    try:
+        # Validate session token
+        session_account_uuid = get_account_uuid_from_session(session_token)
+        if not session_account_uuid:
+            raise HTTPException(status_code=401, detail="Invalid session token")
+        requesting_account = (
+            session.query(table["account"]).filter_by(uuid=session_account_uuid).first()
+        )
+        if not requesting_account:
+            raise HTTPException(status_code=404, detail="Requesting account not found")
+
+        # Get organization info
+        org_logo_resource = table["resource"].alias("org_logo_resource")
+        org_stmt = (
+            select(
+                table["organization"].c.id,
+                table["organization"].c.name,
+                table["organization"].c.description,
+                table["organization"].c.category,
+                table["organization"].c.logo,
+                org_logo_resource.c.directory.label("logo_directory"),
+                org_logo_resource.c.filename.label("logo_filename"),
+                org_logo_resource.c.id.label("logo_id"),
+                table["organization"].c.created_date,
+                table["account"].c.id.label("account_id"),
+                table["account"].c.username,
+            )
+            .select_from(
+                table["organization"]
+                .join(
+                    table["account"],
+                    table["organization"].c.account_id == table["account"].c.id,
+                )
+                .outerjoin(
+                    org_logo_resource,
+                    table["organization"].c.logo == org_logo_resource.c.id,
+                )
+            )
+            .where(table["account"].c.uuid == account_uuid)
+        )
+        org_result = session.execute(org_stmt).first()
+        if not org_result:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        org_data = org_result._mapping
+        account_id = org_data["account_id"]
+
+        # Recent posts (last 5)
+        posts_stmt = (
+            select(
+                table["post"].c.id,
+                table["post"].c.description,
+                table["post"].c.image,
+                table["post"].c.created_date,
+            )
+            .where(table["post"].c.author == account_id)
+            .order_by(table["post"].c.created_date.desc())
+            .limit(5)
+        )
+        posts_result = session.execute(posts_stmt).fetchall()
+        import json
+
+        recent_posts = []
+        for post in posts_result:
+            post_dict = post._mapping
+            images = []
+            if post_dict["image"]:
+                try:
+                    resource_ids = json.loads(post_dict["image"])
+                    if resource_ids:
+                        for resource_id in resource_ids:
+                            resource_stmt = select(
+                                table["resource"].c.id,
+                                table["resource"].c.directory,
+                                table["resource"].c.filename,
+                            ).where(table["resource"].c.id == resource_id)
+                            resource_result = session.execute(resource_stmt).first()
+                            if resource_result:
+                                images.append(
+                                    {
+                                        "id": resource_result.id,
+                                        "directory": resource_result.directory,
+                                        "filename": resource_result.filename,
+                                    }
+                                )
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            recent_posts.append(
+                {
+                    "id": post_dict["id"],
+                    "description": post_dict["description"],
+                    "images": images,
+                    "created_date": post_dict["created_date"],
+                }
+            )
+
+        # Upcoming events (event_date >= now)
+        from datetime import datetime
+
+        now = datetime.now()
+        upcoming_events_stmt = (
+            select(
+                table["event"].c.id,
+                table["event"].c.title,
+                table["event"].c.event_date,
+                table["event"].c.description,
+                table["event"].c.image,
+                table["event"].c.created_date,
+            )
+            .where(
+                table["event"].c.organization_id == org_data["id"],
+                table["event"].c.event_date >= now,
+            )
+            .order_by(table["event"].c.event_date.asc())
+            .limit(5)
+        )
+        upcoming_events_result = session.execute(upcoming_events_stmt).fetchall()
+        upcoming_events = []
+        for event in upcoming_events_result:
+            event_dict = event._mapping
+            event_image = None
+            if event_dict["image"]:
+                event_resource_stmt = select(
+                    table["resource"].c.id,
+                    table["resource"].c.directory,
+                    table["resource"].c.filename,
+                ).where(table["resource"].c.id == event_dict["image"])
+                event_resource_result = session.execute(event_resource_stmt).first()
+                if event_resource_result:
+                    event_image = {
+                        "id": event_resource_result.id,
+                        "directory": event_resource_result.directory,
+                        "filename": event_resource_result.filename,
+                    }
+            upcoming_events.append(
+                {
+                    "id": event_dict["id"],
+                    "title": event_dict["title"],
+                    "event_date": event_dict["event_date"],
+                    "description": event_dict["description"],
+                    "image": event_image,
+                    "created_date": event_dict["created_date"],
+                }
+            )
+
+        # Latest past events (event_date < now, last 5)
+        past_events_stmt = (
+            select(
+                table["event"].c.id,
+                table["event"].c.title,
+                table["event"].c.event_date,
+                table["event"].c.description,
+                table["event"].c.image,
+                table["event"].c.created_date,
+            )
+            .where(
+                table["event"].c.organization_id == org_data["id"],
+                table["event"].c.event_date < now,
+            )
+            .order_by(table["event"].c.event_date.desc())
+            .limit(5)
+        )
+        past_events_result = session.execute(past_events_stmt).fetchall()
+        past_events = []
+        for event in past_events_result:
+            event_dict = event._mapping
+            event_image = None
+            if event_dict["image"]:
+                event_resource_stmt = select(
+                    table["resource"].c.id,
+                    table["resource"].c.directory,
+                    table["resource"].c.filename,
+                ).where(table["resource"].c.id == event_dict["image"])
+                event_resource_result = session.execute(event_resource_stmt).first()
+                if event_resource_result:
+                    event_image = {
+                        "id": event_resource_result.id,
+                        "directory": event_resource_result.directory,
+                        "filename": event_resource_result.filename,
+                    }
+            past_events.append(
+                {
+                    "id": event_dict["id"],
+                    "title": event_dict["title"],
+                    "event_date": event_dict["event_date"],
+                    "description": event_dict["description"],
+                    "image": event_image,
+                    "created_date": event_dict["created_date"],
+                }
+            )
+
+        # Number of members
+        member_count_stmt = (
+            select(func.count())
+            .select_from(table["membership"])
+            .where(
+                table["membership"].c.organization_id == org_data["id"],
+                table["membership"].c.status == "approved",
+            )
+        )
+        member_count = session.execute(member_count_stmt).scalar()
+
+        # Recently added members (last 5 approved memberships)
+        recent_members_stmt = (
+            select(
+                table["user"].c.id,
+                table["user"].c.first_name,
+                table["user"].c.last_name,
+                table["user"].c.bio,
+                table["user"].c.profile_picture,
+                table["membership"].c.created_date.label("membership_date"),
+                table["account"].c.uuid.label("account_uuid"),
+                table["account"].c.email.label("account_email"),
+            )
+            .select_from(
+                table["membership"]
+                .join(
+                    table["user"], table["membership"].c.user_id == table["user"].c.id
+                )
+                .join(
+                    table["account"],
+                    table["user"].c.account_id == table["account"].c.id,
+                )
+            )
+            .where(
+                table["membership"].c.organization_id == org_data["id"],
+                table["membership"].c.status == "approved",
+            )
+            .order_by(table["membership"].c.created_date.desc())
+            .limit(5)
+        )
+        recent_members_result = session.execute(recent_members_stmt).fetchall()
+        recent_members = []
+        for member in recent_members_result:
+            member_dict = member._mapping
+            profile_picture = None
+            if member_dict["profile_picture"]:
+                member_resource_stmt = select(
+                    table["resource"].c.id,
+                    table["resource"].c.directory,
+                    table["resource"].c.filename,
+                ).where(table["resource"].c.id == member_dict["profile_picture"])
+                member_resource_result = session.execute(member_resource_stmt).first()
+                if member_resource_result:
+                    profile_picture = {
+                        "id": member_resource_result.id,
+                        "directory": member_resource_result.directory,
+                        "filename": member_resource_result.filename,
+                    }
+            recent_members.append(
+                {
+                    "id": member_dict["id"],
+                    "first_name": member_dict["first_name"],
+                    "last_name": member_dict["last_name"],
+                    "bio": member_dict["bio"],
+                    "profile_picture": profile_picture,
+                    "membership_date": member_dict["membership_date"],
+                    "account_uuid": member_dict["account_uuid"],
+                    "account_email": member_dict["account_email"],
+                }
+            )
+
+        # Build response
+        profile = {
+            "name": org_data["name"],
+            "username": org_data["username"],
+            "description": org_data["description"],
+            "category": org_data["category"],
+            "logo": (
+                {
+                    "id": org_data["logo_id"],
+                    "directory": org_data["logo_directory"],
+                    "filename": org_data["logo_filename"],
+                }
+                if org_data["logo_id"]
+                else None
+            ),
+            "created_date": org_data["created_date"],
+            "recent_posts": recent_posts,
+            "upcoming_events": upcoming_events,
+            "latest_past_events": past_events,
+            "member_count": member_count,
+            "recent_members": recent_members,
+        }
+        return profile
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
