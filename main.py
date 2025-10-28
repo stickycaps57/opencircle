@@ -17,6 +17,7 @@ from routers import (
     shares,
     notification,
     two_factor_auth,
+    report,
 )
 
 # app = FastAPI(dependencies=[Depends(get_query_token)])
@@ -32,6 +33,7 @@ app.include_router(organization.router)
 app.include_router(shares.router)
 app.include_router(notification.router)
 app.include_router(two_factor_auth.router)
+app.include_router(report.router)
 
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
