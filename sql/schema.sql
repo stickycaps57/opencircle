@@ -30,7 +30,6 @@ CREATE TABLE `role` (
   UNIQUE KEY `name` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
-
 CREATE TABLE `account` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `uuid` char(32) NOT NULL,
@@ -43,6 +42,10 @@ CREATE TABLE `account` (
   `totp_secret` varchar(255) DEFAULT NULL COMMENT 'TOTP secret key for 2FA',
   `two_factor_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'Whether 2FA is enabled for this account',
   `backup_codes` text DEFAULT NULL COMMENT 'JSON array of backup codes for 2FA recovery',
+  `email_otp_code` varchar(10) DEFAULT NULL,
+  `email_otp_expires` datetime DEFAULT NULL,
+  `email_verified` tinyint(1) DEFAULT 0,
+  `otp_attempts` int(11) DEFAULT 0,
   PRIMARY KEY (`id`),
   UNIQUE KEY `account_email_IDX` (`email`) USING BTREE,
   UNIQUE KEY `account_uuid_IDX` (`uuid`) USING BTREE,
@@ -50,6 +53,8 @@ CREATE TABLE `account` (
   KEY `role_id` (`role_id`),
   KEY `account_email_password_IDX` (`email`,`password`) USING BTREE,
   KEY `account_username_IDX` (`username`,`password`) USING BTREE,
+  KEY `idx_account_email_otp` (`email`,`email_otp_code`,`email_otp_expires`),
+  KEY `idx_account_email_verified` (`email_verified`),
   CONSTRAINT `account_ibfk_1` FOREIGN KEY (`role_id`) REFERENCES `role` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
@@ -135,7 +140,7 @@ CREATE TABLE `membership` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `organization_id` bigint(20) NOT NULL,
   `user_id` bigint(20) NOT NULL,
-  `status` enum('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  `status` enum('pending','approved','rejected','left') NOT NULL DEFAULT 'pending',
   `created_date` datetime NOT NULL DEFAULT current_timestamp(),
   `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
