@@ -19,6 +19,7 @@ import bcrypt
 from utils.user_utils import create_user
 from utils.organization_utils import create_organization
 from utils.two_factor_auth import TwoFactorAuth
+from utils.email_otp import get_email_otp_service
 import jwt
 import os
 from datetime import datetime, timedelta, timezone
@@ -53,28 +54,58 @@ async def create_user_account(
     username: constr(min_length=3) = Form(...),
     password: constr(min_length=8) = Form(...),
 ):
-    # Generate a UUID for the account
-    account_uuid = uuid.uuid4().hex
-
-    # Hash the password securely
-    hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode(
-        "utf-8"
+    """
+    Initiate user account creation with email OTP verification
+    """
+    # Check if email or username already exists
+    check_stmt = select(table["account"]).where(
+        or_(
+            table["account"].c.email == email,
+            table["account"].c.username == username
+        )
     )
-
-    stmt = insert(table["account"]).values(
-        uuid=account_uuid,
-        email=email,
-        username=username,
-        password=hashed_password,
-        role_id=1,
-    )
+    existing_account = session.execute(check_stmt).first()
+    if existing_account:
+        if existing_account.email == email:
+            raise HTTPException(status_code=400, detail="Email already exists")
+        else:
+            raise HTTPException(status_code=400, detail="Username already exists")
 
     try:
+        # Generate a UUID for the account
+        account_uuid = uuid.uuid4().hex
+
+        # Hash the password securely
+        hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+        # Generate and send OTP
+        email_otp_service = get_email_otp_service()
+        full_name = f"{first_name} {last_name}"
+        otp_result = email_otp_service.generate_and_send_otp(email, "user", full_name)
+        
+        if not otp_result:
+            raise HTTPException(status_code=500, detail="Failed to send verification email")
+        
+        otp_code, otp_expires = otp_result
+
+        # Create account record with OTP (but not verified yet)
+        stmt = insert(table["account"]).values(
+            uuid=account_uuid,
+            email=email,
+            username=username,
+            password=hashed_password,
+            role_id=1,
+            email_otp_code=otp_code,
+            email_otp_expires=otp_expires,
+            email_verified=False,
+            otp_attempts=0,
+        )
 
         result = session.execute(stmt)
-        session.commit()
+        session.commit()  # Commit the account first
         account_id = result.inserted_primary_key[0]
 
+        # Now create the user record in a separate transaction
         create_user(
             UserModel(
                 account_id=account_id,
@@ -85,9 +116,14 @@ async def create_user_account(
                 uuid=account_uuid,
             )
         )
-
-        session.commit()
-        return {"message": "Account created successfully", "uuid": account_uuid}
+        
+        return {
+            "message": "Account created. Please check your email for a verification code.",
+            "email": email,
+            "verification_required": True,
+            "next_step": "POST /account/verify-email-otp with your OTP code"
+        }
+        
     except IntegrityError:
         session.rollback()
         raise HTTPException(status_code=400, detail="Email or username already exists")
@@ -108,27 +144,57 @@ async def create_organization_account(
     username: constr(min_length=3) = Form(...),
     password: constr(min_length=8) = Form(...),
 ):
-    # Generate a UUID for the account
-    account_uuid = uuid.uuid4().hex
-
-    # Hash the password securely
-    hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode(
-        "utf-8"
+    """
+    Initiate organization account creation with email OTP verification
+    """
+    # Check if email or username already exists
+    check_stmt = select(table["account"]).where(
+        or_(
+            table["account"].c.email == email,
+            table["account"].c.username == username
+        )
     )
-
-    stmt = insert(table["account"]).values(
-        uuid=account_uuid,
-        email=email,
-        username=username,
-        password=hashed_password,
-        role_id=2,
-    )
+    existing_account = session.execute(check_stmt).first()
+    if existing_account:
+        if existing_account.email == email:
+            raise HTTPException(status_code=400, detail="Email already exists")
+        else:
+            raise HTTPException(status_code=400, detail="Username already exists")
 
     try:
+        # Generate a UUID for the account
+        account_uuid = uuid.uuid4().hex
+
+        # Hash the password securely
+        hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+        # Generate and send OTP
+        email_otp_service = get_email_otp_service()
+        otp_result = email_otp_service.generate_and_send_otp(email, "organization", name)
+        
+        if not otp_result:
+            raise HTTPException(status_code=500, detail="Failed to send verification email")
+        
+        otp_code, otp_expires = otp_result
+
+        # Create account record with OTP (but not verified yet)
+        stmt = insert(table["account"]).values(
+            uuid=account_uuid,
+            email=email,
+            username=username,
+            password=hashed_password,
+            role_id=2,
+            email_otp_code=otp_code,
+            email_otp_expires=otp_expires,
+            email_verified=False,
+            otp_attempts=0,
+        )
+
         result = session.execute(stmt)
-        session.commit()
+        session.commit()  # Commit the account first
         account_id = result.inserted_primary_key[0]
 
+        # Now create the organization record in a separate transaction
         create_organization(
             OrganizationModel(
                 account_id=account_id,
@@ -139,9 +205,14 @@ async def create_organization_account(
                 uuid=account_uuid,
             )
         )
-
-        session.commit()
-        return {"message": "Account created successfully", "uuid": account_uuid}
+        
+        return {
+            "message": "Organization account created. Please check your email for a verification code.",
+            "email": email,
+            "verification_required": True,
+            "next_step": "POST /account/verify-email-otp with your OTP code"
+        }
+        
     except IntegrityError:
         session.rollback()
         raise HTTPException(status_code=400, detail="Email or username already exists")
@@ -208,6 +279,13 @@ async def user_sign_in(
         password.encode("utf-8"), account["password"].encode("utf-8")
     ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Check if email is verified
+    if not account.get("email_verified", False):
+        raise HTTPException(
+            status_code=403, 
+            detail="Email not verified. Please check your email for verification code or request a new one."
+        )
 
     # Check if 2FA is enabled
     if account["two_factor_enabled"]:
@@ -332,6 +410,13 @@ async def organization_sign_in(
         password.encode("utf-8"), account["password"].encode("utf-8")
     ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Check if email is verified
+    if not account.get("email_verified", False):
+        raise HTTPException(
+            status_code=403, 
+            detail="Email not verified. Please check your email for verification code or request a new one."
+        )
 
     # Check if 2FA is enabled
     if account["two_factor_enabled"]:
@@ -788,6 +873,180 @@ async def verify_2fa(
     except SQLAlchemyError as e:
         session.rollback()
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.post("/verify-email-otp", tags=["Verify Email OTP"])
+async def verify_email_otp(
+    email: EmailStr = Form(...),
+    otp_code: str = Form(..., description="6-digit OTP code from email"),
+):
+    """
+    Verify email OTP and activate account
+    """
+    try:
+        # Find account by email
+        account_stmt = select(table["account"]).where(table["account"].c.email == email)
+        account_result = session.execute(account_stmt).first()
+        
+        if not account_result:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        account = account_result._mapping
+        
+        # Check if account is already verified
+        if account["email_verified"]:
+            raise HTTPException(status_code=400, detail="Account is already verified")
+        
+        # Check OTP attempts
+        if account["otp_attempts"] >= 5:
+            raise HTTPException(
+                status_code=429, 
+                detail="Too many verification attempts. Please request a new OTP code."
+            )
+        
+        # Get email OTP service
+        email_otp_service = get_email_otp_service()
+        
+        # Verify OTP
+        is_valid = email_otp_service.verify_otp(
+            otp_code,
+            account["email_otp_code"],
+            account["email_otp_expires"]
+        )
+        
+        if not is_valid:
+            # Increment failed attempts
+            update_attempts_stmt = (
+                update(table["account"])
+                .where(table["account"].c.email == email)
+                .values(otp_attempts=account["otp_attempts"] + 1)
+            )
+            session.execute(update_attempts_stmt)
+            session.commit()
+            
+            remaining_attempts = 5 - (account["otp_attempts"] + 1)
+            if remaining_attempts <= 0:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many verification attempts. Please request a new OTP code."
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid or expired OTP code. {remaining_attempts} attempts remaining."
+                )
+        
+        # OTP is valid - activate the account
+        update_stmt = (
+            update(table["account"])
+            .where(table["account"].c.email == email)
+            .values(
+                email_verified=True,
+                email_otp_code=None,
+                email_otp_expires=None,
+                otp_attempts=0
+            )
+        )
+        session.execute(update_stmt)
+        session.commit()
+        
+        # Determine account type for response
+        account_type = "user" if account["role_id"] == 1 else "organization"
+        
+        return {
+            "message": f"Email verified successfully! Your {account_type} account is now active.",
+            "email_verified": True,
+            "account_type": account_type,
+            "next_step": f"You can now login using POST /account/{account_type}_signin"
+        }
+        
+    except HTTPException as e:
+        # Re-raise HTTP exceptions to preserve status code and detail
+        raise e
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.post("/resend-email-otp", tags=["Resend Email OTP"])
+async def resend_email_otp(
+    email: EmailStr = Form(...),
+):
+    """
+    Resend email OTP for account verification
+    """
+    try:
+        # Find account by email
+        account_stmt = select(table["account"]).where(table["account"].c.email == email)
+        account_result = session.execute(account_stmt).first()
+        
+        if not account_result:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        account = account_result._mapping
+        
+        # Check if account is already verified
+        if account["email_verified"]:
+            raise HTTPException(status_code=400, detail="Account is already verified")
+        
+        # Get account details for email
+        if account["role_id"] == 1:  # User
+            # Get user name
+            user_stmt = select(table["user"]).where(table["user"].c.account_id == account["id"])
+            user_result = session.execute(user_stmt).first()
+            if not user_result:
+                raise HTTPException(status_code=404, detail="User details not found")
+            user = user_result._mapping
+            name = f"{user['first_name']} {user['last_name']}"
+            account_type = "user"
+        else:  # Organization
+            # Get organization name
+            org_stmt = select(table["organization"]).where(table["organization"].c.account_id == account["id"])
+            org_result = session.execute(org_stmt).first()
+            if not org_result:
+                raise HTTPException(status_code=404, detail="Organization details not found")
+            org = org_result._mapping
+            name = org["name"]
+            account_type = "organization"
+        
+        # Generate new OTP
+        email_otp_service = get_email_otp_service()
+        otp_result = email_otp_service.generate_and_send_otp(email, account_type, name)
+        
+        if not otp_result:
+            raise HTTPException(status_code=500, detail="Failed to send verification email")
+        
+        otp_code, otp_expires = otp_result
+        
+        # Update account with new OTP
+        update_stmt = (
+            update(table["account"])
+            .where(table["account"].c.email == email)
+            .values(
+                email_otp_code=otp_code,
+                email_otp_expires=otp_expires,
+                otp_attempts=0  # Reset attempts with new OTP
+            )
+        )
+        session.execute(update_stmt)
+        session.commit()
+        
+        return {
+            "message": "New verification code sent to your email",
+            "email": email,
+            "next_step": "POST /account/verify-email-otp with your new OTP code"
+        }
+        
+    except HTTPException as e:
+        # Re-raise HTTP exceptions to preserve status code and detail
+        raise e
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
