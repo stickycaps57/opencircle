@@ -268,6 +268,98 @@ async def get_2fa_status(
         session.close()
 
 
+@router.post("/bypass-two-factor", tags=["Bypass Two-Factor"])
+async def bypass_two_factor(
+    bypass_status: bool = Form(..., description="Set bypass two-factor status (true to bypass, false to require 2FA)"),
+    session_token: str = Cookie(None, alias="session_token"),
+):
+    """
+    Set bypass two-factor authentication status for the account
+    """
+    session = db.session
+    
+    # Validate session token
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+    
+    # Get account_uuid from session
+    account_uuid = get_account_uuid_from_session(session_token)
+    if not account_uuid:
+        raise HTTPException(status_code=401, detail="Invalid session token")
+    
+    try:
+        # Get account details
+        account_stmt = select(table["account"]).where(table["account"].c.uuid == account_uuid)
+        account_result = session.execute(account_stmt).first()
+        if not account_result:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        # Update bypass two-factor status
+        update_stmt = (
+            update(table["account"])
+            .where(table["account"].c.uuid == account_uuid)
+            .values(bypass_two_factor=bypass_status)
+        )
+        session.execute(update_stmt)
+        session.commit()
+        
+        status_message = "enabled" if bypass_status else "disabled"
+        return {
+            "bypass_two_factor": bypass_status,
+            "message": f"Two-factor authentication bypass has been {status_message} for your account"
+        }
+        
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.get("/is-two-factor-bypassed", tags=["Check Two-Factor Bypass"])
+async def is_two_factor_bypassed(
+    session_token: str = Cookie(None, alias="session_token"),
+):
+    """
+    Check if two-factor authentication is bypassed for the current account
+    """
+    session = db.session
+    
+    # Validate session token
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session token missing")
+    
+    # Get account_uuid from session
+    account_uuid = get_account_uuid_from_session(session_token)
+    if not account_uuid:
+        raise HTTPException(status_code=401, detail="Invalid session token")
+    
+    try:
+        # Get account details
+        account_stmt = select(table["account"]).where(table["account"].c.uuid == account_uuid)
+        account_result = session.execute(account_stmt).first()
+        if not account_result:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        account = account_result._mapping
+        
+        return {
+            "bypass_two_factor": bool(account["bypass_two_factor"]),
+            "two_factor_enabled": bool(account["two_factor_enabled"]),
+            "effective_2fa_required": bool(account["two_factor_enabled"]) and not bool(account["bypass_two_factor"])
+        }
+        
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
 @router.post("/regenerate-backup-codes", tags=["Regenerate Backup Codes"])
 async def regenerate_backup_codes(
     totp_token: str = Form(..., description="6-digit TOTP token from authenticator app"),
@@ -330,3 +422,5 @@ async def regenerate_backup_codes(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+

@@ -381,6 +381,7 @@ async def user_sign_in(
             ),
             "uuid": account["uuid"],
             "role_id": account["role_id"],  # Include role_id from account table
+            "bypass_two_factor": account["bypass_two_factor"],
         },
         "expires_at": expires_at.isoformat(),
     }
@@ -514,6 +515,7 @@ async def organization_sign_in(
             "description": organization["description"],
             "uuid": account["uuid"],
             "role_id": account["role_id"],  # Include role_id from account table
+            "bypass_two_factor": account["bypass_two_factor"],
         },
         "expires_at": expires_at.isoformat(),
     }
@@ -605,6 +607,7 @@ async def get_current_user(session_token: str = Cookie(None)):
                     ),
                     "uuid": account["uuid"],
                     "role_id": account["role_id"],
+                    "bypass_two_factor": account["bypass_two_factor"],
                 }
             }
         elif account["role_id"] == 2:  # Organization
@@ -660,6 +663,7 @@ async def get_current_user(session_token: str = Cookie(None)):
                     "description": organization["description"],
                     "uuid": account["uuid"],
                     "role_id": account["role_id"],
+                    "bypass_two_factor": account["bypass_two_factor"],
                 }
             }
         else:
@@ -807,6 +811,7 @@ async def verify_2fa(
                     ),
                     "uuid": account["uuid"],
                     "role_id": account["role_id"],
+                    "bypass_two_factor": account["bypass_two_factor"],
                 },
                 "expires_at": expires_at.isoformat(),
             }
@@ -864,6 +869,7 @@ async def verify_2fa(
                     "description": organization["description"],
                     "uuid": account["uuid"],
                     "role_id": account["role_id"],
+                    "bypass_two_factor": account["bypass_two_factor"],
                 },
                 "expires_at": expires_at.isoformat(),
             }

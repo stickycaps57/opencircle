@@ -30,6 +30,8 @@ CREATE TABLE `role` (
   UNIQUE KEY `name` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
+-- opencircle.account definition
+
 CREATE TABLE `account` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `uuid` char(32) NOT NULL,
@@ -46,6 +48,7 @@ CREATE TABLE `account` (
   `email_otp_expires` datetime DEFAULT NULL,
   `email_verified` tinyint(1) DEFAULT 0,
   `otp_attempts` int(11) DEFAULT 0,
+  `bypass_two_factor` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
   UNIQUE KEY `account_email_IDX` (`email`) USING BTREE,
   UNIQUE KEY `account_uuid_IDX` (`uuid`) USING BTREE,
