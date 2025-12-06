@@ -5,6 +5,7 @@ from sqlalchemy import insert, delete, select, func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from utils.session_utils import get_account_uuid_from_session
 from typing import Optional
+import json
 
 router = APIRouter(
     prefix="/share",
@@ -316,11 +317,279 @@ async def get_shares_for_content(
                 }
             })
 
-        content_name = "post" if content_type == 1 else "event"
         return {
             "content_type": content_name,
             "content_id": content_id,
             "shares": shares,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_count,
+                "pages": (total_count + limit - 1) // limit
+            }
+        }
+
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.get("/all_with_comments", tags=["Get All Shares With Comments"])
+async def get_all_shares_with_comments(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=50, description="Items per page"),
+    content_type: Optional[int] = Query(None, description="Filter by content type: 1 for posts, 2 for events"),
+):
+    """
+    Get all shared content (posts and events) with comments for news feed
+    """
+    session = db.session
+    try:
+        offset = (page - 1) * limit
+
+        # Build base query for shares
+        base_query = select(table["shares"])
+
+        # Add content type filter if provided
+        if content_type is not None:
+            if content_type not in [1, 2]:
+                raise HTTPException(status_code=400, detail="Content type must be 1 (post) or 2 (event)")
+            base_query = base_query.where(table["shares"].c.content_type == content_type)
+
+        # Get total count
+        count_query = select(func.count()).select_from(base_query.alias())
+        total_count = session.execute(count_query).scalar()
+
+        # Get shares with pagination
+        shares_query = base_query.order_by(
+            table["shares"].c.date_created.desc()
+        ).limit(limit).offset(offset)
+
+        shares_result = session.execute(shares_query).fetchall()
+
+        shares_with_content = []
+        
+        for share in shares_result:
+            share_data = dict(share._mapping)
+            
+            # Get sharer details
+            sharer_query = select(
+                table["account"].c.uuid,
+                table["account"].c.email,
+                table["user"].c.first_name,
+                table["user"].c.last_name,
+                table["user"].c.profile_picture,
+                table["resource"].c.directory.label("profile_picture_directory"),
+                table["resource"].c.filename.label("profile_picture_filename"),
+                table["organization"].c.name.label("org_name")
+            ).select_from(
+                table["account"]
+                .outerjoin(table["user"], table["user"].c.account_id == table["account"].c.id)
+                .outerjoin(table["organization"], table["organization"].c.account_id == table["account"].c.id)
+                .outerjoin(table["resource"], table["user"].c.profile_picture == table["resource"].c.id)
+            ).where(table["account"].c.uuid == share_data["account_uuid"])
+            
+            sharer_result = session.execute(sharer_query).first()
+            
+            content_details = None
+            comments = []
+            
+            if share_data["content_type"] == 1:  # Post
+                # Get post details with author info
+                post_query = select(
+                    table["post"].c.id,
+                    table["post"].c.description,
+                    table["post"].c.image,
+                    table["post"].c.created_date,
+                    table["account"].c.uuid.label("author_uuid"),
+                    table["account"].c.email.label("author_email"),
+                    table["user"].c.first_name.label("author_first_name"),
+                    table["user"].c.last_name.label("author_last_name"),
+                    table["user"].c.profile_picture.label("author_profile_picture"),
+                    table["resource"].c.directory.label("author_profile_directory"),
+                    table["resource"].c.filename.label("author_profile_filename")
+                ).select_from(
+                    table["post"]
+                    .join(table["account"], table["post"].c.author == table["account"].c.id)
+                    .outerjoin(table["user"], table["user"].c.account_id == table["account"].c.id)
+                    .outerjoin(table["resource"], table["user"].c.profile_picture == table["resource"].c.id)
+                ).where(table["post"].c.id == share_data["content_id"])
+                
+                post_result = session.execute(post_query).first()
+                if post_result:
+                    # Parse images from JSON
+                    images = []
+                    if post_result.image:
+                        try:
+                            resource_ids = json.loads(post_result.image)
+                            for resource_id in resource_ids:
+                                image_query = select(table["resource"]).where(table["resource"].c.id == resource_id)
+                                image_result = session.execute(image_query).first()
+                                if image_result:
+                                    images.append({
+                                        "id": image_result.id,
+                                        "directory": image_result.directory,
+                                        "filename": image_result.filename
+                                    })
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    
+                    content_details = {
+                        "type": "post",
+                        "id": post_result.id,
+                        "description": post_result.description,
+                        "images": images,
+                        "created_date": post_result.created_date,
+                        "author": {
+                            "uuid": post_result.author_uuid,
+                            "email": post_result.author_email,
+                            "first_name": post_result.author_first_name,
+                            "last_name": post_result.author_last_name,
+                            "profile_picture": {
+                                "directory": post_result.author_profile_directory,
+                                "filename": post_result.author_profile_filename
+                            } if post_result.author_profile_directory else None
+                        }
+                    }
+                    
+                    # Get post comments (top 5 latest)
+                    comments_query = select(
+                        table["comment"].c.id,
+                        table["comment"].c.message,
+                        table["comment"].c.created_date,
+                        table["account"].c.uuid.label("commenter_uuid"),
+                        table["account"].c.email.label("commenter_email"),
+                        table["user"].c.first_name.label("commenter_first_name"),
+                        table["user"].c.last_name.label("commenter_last_name")
+                    ).select_from(
+                        table["comment"]
+                        .join(table["account"], table["comment"].c.author == table["account"].c.id)
+                        .outerjoin(table["user"], table["user"].c.account_id == table["account"].c.id)
+                    ).where(
+                        table["comment"].c.post_id == share_data["content_id"]
+                    ).order_by(table["comment"].c.created_date.desc()).limit(5)
+                    
+                    comments_result = session.execute(comments_query).fetchall()
+                    comments = [{
+                        "id": comment.id,
+                        "message": comment.message,
+                        "created_date": comment.created_date,
+                        "author": {
+                            "uuid": comment.commenter_uuid,
+                            "email": comment.commenter_email,
+                            "first_name": comment.commenter_first_name,
+                            "last_name": comment.commenter_last_name
+                        }
+                    } for comment in comments_result]
+
+            elif share_data["content_type"] == 2:  # Event
+                # Get event details with organization info
+                event_query = select(
+                    table["event"].c.id,
+                    table["event"].c.title,
+                    table["event"].c.description,
+                    table["event"].c.event_date,
+                    table["event"].c.image,
+                    table["event"].c.created_date,
+                    table["organization"].c.name.label("organization_name"),
+                    table["organization"].c.category.label("organization_category"),
+                    table["address"].c.country,
+                    table["address"].c.province,
+                    table["address"].c.city,
+                    table["address"].c.barangay,
+                    table["address"].c.house_building_number,
+                    table["resource"].c.directory.label("event_image_directory"),
+                    table["resource"].c.filename.label("event_image_filename")
+                ).select_from(
+                    table["event"]
+                    .join(table["organization"], table["event"].c.organization_id == table["organization"].c.id)
+                    .outerjoin(table["address"], table["event"].c.address_id == table["address"].c.id)
+                    .outerjoin(table["resource"], table["event"].c.image == table["resource"].c.id)
+                ).where(table["event"].c.id == share_data["content_id"])
+                
+                event_result = session.execute(event_query).first()
+                if event_result:
+                    content_details = {
+                        "type": "event",
+                        "id": event_result.id,
+                        "title": event_result.title,
+                        "description": event_result.description,
+                        "event_date": event_result.event_date,
+                        "created_date": event_result.created_date,
+                        "image": {
+                            "directory": event_result.event_image_directory,
+                            "filename": event_result.event_image_filename
+                        } if event_result.event_image_directory else None,
+                        "organization": {
+                            "name": event_result.organization_name,
+                            "category": event_result.organization_category
+                        },
+                        "address": {
+                            "country": event_result.country,
+                            "province": event_result.province,
+                            "city": event_result.city,
+                            "barangay": event_result.barangay,
+                            "house_building_number": event_result.house_building_number
+                        }
+                    }
+                    
+                    # Get event comments (top 5 latest)
+                    comments_query = select(
+                        table["comment"].c.id,
+                        table["comment"].c.message,
+                        table["comment"].c.created_date,
+                        table["account"].c.uuid.label("commenter_uuid"),
+                        table["account"].c.email.label("commenter_email"),
+                        table["user"].c.first_name.label("commenter_first_name"),
+                        table["user"].c.last_name.label("commenter_last_name")
+                    ).select_from(
+                        table["comment"]
+                        .join(table["account"], table["comment"].c.author == table["account"].c.id)
+                        .outerjoin(table["user"], table["user"].c.account_id == table["account"].c.id)
+                    ).where(
+                        table["comment"].c.event_id == share_data["content_id"]
+                    ).order_by(table["comment"].c.created_date.desc()).limit(5)
+                    
+                    comments_result = session.execute(comments_query).fetchall()
+                    comments = [{
+                        "id": comment.id,
+                        "message": comment.message,
+                        "created_date": comment.created_date,
+                        "author": {
+                            "uuid": comment.commenter_uuid,
+                            "email": comment.commenter_email,
+                            "first_name": comment.commenter_first_name,
+                            "last_name": comment.commenter_last_name
+                        }
+                    } for comment in comments_result]
+
+            # Only add to results if we have content details
+            if content_details and sharer_result:
+                shares_with_content.append({
+                    "share_id": share_data["id"],
+                    "share_comment": share_data["comment"],
+                    "share_date": share_data["date_created"],
+                    "sharer": {
+                        "uuid": sharer_result.uuid,
+                        "email": sharer_result.email,
+                        "first_name": sharer_result.first_name,
+                        "last_name": sharer_result.last_name,
+                        "org_name": sharer_result.org_name,
+                        "profile_picture": {
+                            "directory": sharer_result.profile_picture_directory,
+                            "filename": sharer_result.profile_picture_filename
+                        } if sharer_result.profile_picture_directory else None
+                    },
+                    "content": content_details,
+                    "comments": comments,
+                    "comments_count": len(comments)
+                })
+
+        return {
+            "shares": shares_with_content,
             "pagination": {
                 "page": page,
                 "limit": limit,
