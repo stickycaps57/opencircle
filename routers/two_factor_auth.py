@@ -183,9 +183,9 @@ async def disable_2fa(
         
         account = account_result._mapping
         
-        # Check if 2FA is enabled
-        if not account["two_factor_enabled"]:
-            raise HTTPException(status_code=400, detail="2FA is not enabled for this account")
+        # # Check if 2FA is enabled
+        # if not account["two_factor_enabled"]:
+        #     raise HTTPException(status_code=400, detail="2FA is not enabled for this account")
         
         # Try TOTP first, then backup code
         is_valid = False
