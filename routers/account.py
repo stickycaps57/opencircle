@@ -23,6 +23,7 @@ from utils.email_otp import get_email_otp_service
 import jwt
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from utils.session_utils import (
     add_session,
     delete_session,
@@ -49,7 +50,7 @@ async def create_user_account(
     first_name: constr(min_length=1) = Form(...),
     last_name: constr(min_length=1) = Form(...),
     bio: str = Form(None),
-    profile_picture: UploadFile = File(...),
+    profile_picture: Optional[UploadFile] = File(None),
     email: EmailStr = Form(...),
     username: constr(min_length=3) = Form(...),
     password: constr(min_length=8) = Form(...),
@@ -137,7 +138,7 @@ async def create_user_account(
 @router.post("/organization", tags=["Create Organization Account"])
 async def create_organization_account(
     name: constr(min_length=1) = Form(...),
-    logo: UploadFile = File(...),
+    logo: Optional[UploadFile] = File(None),
     category: str = Form(...),
     description: str = Form(None),
     email: EmailStr = Form(...),
@@ -262,6 +263,7 @@ async def user_sign_in(
     request: Request = None,
     response: Response = None,
 ):
+    session = db.session
     # Find account by email or username
     stmt = select(table["account"]).where(
         or_(
@@ -321,6 +323,7 @@ async def user_sign_in(
             table["user"].c.last_name,
             table["user"].c.bio,
             table["account"].c.email,
+            table["account"].c.username,
             table["user"].c.profile_picture,
             table["resource"].c.directory.label("profile_picture_directory"),
             table["resource"].c.filename.label("profile_picture_filename"),
@@ -370,6 +373,7 @@ async def user_sign_in(
             "last_name": user["last_name"],
             "bio": user["bio"],
             "email": account["email"],
+            "username": account["username"],
             "profile_picture": (
                 {
                     "id": user["profile_picture"],
@@ -454,6 +458,7 @@ async def organization_sign_in(
             table["organization"].c.category,
             table["organization"].c.description,
             table["account"].c.email,
+            table["account"].c.username,
             table["resource"].c.directory.label("logo_directory"),
             table["resource"].c.filename.label("logo_filename"),
         )
@@ -502,6 +507,7 @@ async def organization_sign_in(
             "account_id": organization["account_id"],
             "name": organization["name"],
             "email": account["email"],
+            "username": account["username"],
             "logo": (
                 {
                     "id": organization["logo"],
@@ -690,6 +696,7 @@ async def verify_2fa(
     """
     Verify 2FA token and complete login
     """
+
     if not temp_session_token:
         raise HTTPException(status_code=401, detail="Temporary session token missing")
     
@@ -760,7 +767,7 @@ async def verify_2fa(
         )
         
         # Return appropriate account details based on type
-        if account_type == "user":
+        if account_type == "member":
             # Get user details
             user_stmt = (
                 select(
@@ -770,6 +777,7 @@ async def verify_2fa(
                     table["user"].c.last_name,
                     table["user"].c.bio,
                     table["account"].c.email,
+                    table["account"].c.username,
                     table["user"].c.profile_picture,
                     table["resource"].c.directory.label("profile_picture_directory"),
                     table["resource"].c.filename.label("profile_picture_filename"),
@@ -800,6 +808,7 @@ async def verify_2fa(
                     "last_name": user["last_name"],
                     "bio": user["bio"],
                     "email": account["email"],
+                    "username": account["username"],
                     "profile_picture": (
                         {
                             "id": user["profile_picture"],
