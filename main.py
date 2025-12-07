@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse
 
 # from .dependencies import get_query_token, get_token_header
 # from .internal import admin
@@ -35,11 +36,17 @@ app.include_router(notification.router)
 app.include_router(two_factor_auth.router)
 app.include_router(report.router)
 
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+@app.get("/uploads/{file_path:path}")
+async def serve_file(file_path: str):
+    response = FileResponse(f"uploads/{file_path}")
+    return response
 
 # Configure CORS
 origins = [
     "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
 
 app.add_middleware(
