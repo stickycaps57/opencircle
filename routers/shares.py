@@ -438,11 +438,13 @@ async def get_shares_for_content(
             table["account"].c.uuid.label("sharer_uuid"),
             table["account"].c.email.label("sharer_email"),
             table["user"].c.first_name,
-            table["user"].c.last_name
+            table["user"].c.last_name,
+            table["organization"].c.name.label("organization_name")
         ).select_from(
             table["shares"]
             .join(table["account"], table["shares"].c.account_uuid == table["account"].c.uuid)
             .outerjoin(table["user"], table["user"].c.account_id == table["account"].c.id)
+            .outerjoin(table["organization"], table["organization"].c.account_id == table["account"].c.id)
         ).where(
             (table["shares"].c.content_id == content_id) &
             (table["shares"].c.content_type == content_type)
@@ -462,7 +464,8 @@ async def get_shares_for_content(
                     "uuid": share.sharer_uuid,
                     "email": share.sharer_email,
                     "first_name": share.first_name,
-                    "last_name": share.last_name
+                    "last_name": share.last_name,
+                    "organization_name": share.organization_name,
                 }
             })
 
