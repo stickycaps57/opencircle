@@ -13,7 +13,7 @@ router = APIRouter(
 )
 db = Database()
 table = db.tables
-session = db.session
+# session = db.session
 
 @router.post("/", tags=["Share Content"])
 async def share_content(
@@ -23,6 +23,9 @@ async def share_content(
     session_token: str = Cookie(None, alias="session_token"),
 ):
     try:
+
+        session = db.session
+
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -94,6 +97,9 @@ async def delete_share(
     session_token: str = Cookie(None, alias="session_token"),
 ):
     try:
+
+        session = db.session
+
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -133,19 +139,30 @@ async def delete_share(
 
 @router.get("/user", tags=["Get User Shares"])
 async def get_user_shares(
+    account_uuid: str,
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(10, ge=1, le=50, description="Items per page"),
     content_type: Optional[int] = Query(None, description="Filter by content type: 1 for posts, 2 for events"),
-    session_token: str = Cookie(None, alias="session_token"),
+    
+    # session_token: str = Cookie(None, alias="session_token"),
 ):
+
     try:
-        if not session_token:
-            raise HTTPException(status_code=401, detail="Authentication required")
 
-        # Get account_uuid from session
-        account_uuid = get_account_uuid_from_session(session_token)
+        session = db.session
 
+        # if not session_token:
+        #     raise HTTPException(status_code=401, detail="Authentication required")
+
+        # # Get account_uuid from session
+        # account_uuid = get_account_uuid_from_session(session_token)
+
+       
         offset = (page - 1) * limit
+        select_account_id = select(table["account"].c.id).where(
+            table["account"].c.uuid == account_uuid
+        )
+        account_id = session.execute(select_account_id).scalar()
 
         # Build base query
         base_query = select(table["shares"]).where(
@@ -175,44 +192,142 @@ async def get_user_shares(
             
             # Get content details based on content_type
             if share_data["content_type"] == 1:  # Post
-                post_query = select(
-                    table["post"].c.id,
-                    table["post"].c.description,
-                    table["post"].c.created_date,
-                    table["account"].c.uuid.label("author_uuid"),
-                    table["account"].c.email.label("author_email")
-                ).select_from(
-                    table["post"].join(
-                        table["account"],
-                        table["post"].c.author == table["account"].c.id
+                profile_resource = table["resource"].alias("profile_resource")
+                org_logo_resource = table["resource"].alias("org_logo_resource")
+                post_query = (
+                    select(
+                        table["post"].c.id,
+                        table["post"].c.description,
+                        table["post"].c.created_date,
+                        table["post"].c.image,
+                        table["account"].c.uuid.label("author_uuid"),
+                        table["account"].c.email.label("author_email"),
+                        table["user"].c.id.label("user_id"),
+                        table["user"].c.first_name.label("author_first_name"),
+                        table["user"].c.last_name.label("author_last_name"),
+                        profile_resource.c.directory.label("profile_picture_directory"),
+                        profile_resource.c.filename.label("profile_picture_filename"),
+                        profile_resource.c.id.label("profile_picture_id"),
+                        table["organization"].c.name.label("author_organization_name"),
+                        org_logo_resource.c.directory.label("organization_logo_directory"),
+                        org_logo_resource.c.filename.label("organization_logo_filename"),
+                        org_logo_resource.c.id.label("organization_logo_id"),
                     )
-                ).where(table["post"].c.id == share_data["content_id"])
+                    .select_from(
+                        table["post"]
+                        .join(
+                            table["account"],
+                            table["post"].c.author == table["account"].c.id,
+                        )
+                        .outerjoin(
+                            table["user"],
+                            table["user"].c.account_id == table["account"].c.id,
+                        )
+                        .outerjoin(
+                            profile_resource,
+                            table["user"].c.profile_picture == profile_resource.c.id,
+                        )
+                        .outerjoin(
+                            table["organization"],
+                            table["organization"].c.account_id == table["account"].c.id,
+                        )
+                        .outerjoin(
+                            org_logo_resource,
+                            table["organization"].c.logo == org_logo_resource.c.id,
+                        )
+                    )
+                    .where(table["post"].c.id == share_data["content_id"])
+                )
                 
                 post_result = session.execute(post_query).fetchone()
                 if post_result:
+                    images = []
+                    if post_result.image:
+                        try:
+                            resource_ids = json.loads(post_result.image)
+                            for res_id in resource_ids:
+                                res_stmt = select(
+                                    table["resource"].c.id,
+                                    table["resource"].c.directory,
+                                    table["resource"].c.filename,
+                                ).where(table["resource"].c.id == res_id)
+                                res_result = session.execute(res_stmt).first()
+                                if res_result:
+                                    res_data = res_result._mapping
+                                    images.append(
+                                        {
+                                            "id": res_data["id"],
+                                            "directory": res_data["directory"],
+                                            "filename": res_data["filename"],
+                                        }
+                                    )
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
                     share_data["content_details"] = {
                         "type": "post",
                         "id": post_result.id,
+                         "user_id": post_result.user_id,
                         "description": post_result.description,
                         "created_date": post_result.created_date,
                         "author_uuid": post_result.author_uuid,
-                        "author_email": post_result.author_email
+                        "author_email": post_result.author_email,
+                        "author_first_name": post_result.author_first_name,
+                        "author_last_name": post_result.author_last_name,
+                        "author_organization_name": post_result.author_organization_name,
+                        "images": images,
+                        "profile_picture": (
+                            {
+                                "id": post_result.profile_picture_id,
+                                "directory": post_result.profile_picture_directory,
+                                "filename": post_result.profile_picture_filename,
+                            }
+                            if post_result.profile_picture_id
+                            else None
+                        ),
+                        "logo": (
+                            {
+                                "id": post_result.organization_logo_id,
+                                "directory": post_result.organization_logo_directory,
+                                "filename": post_result.organization_logo_filename,
+                            }
+                            if post_result.organization_logo_id
+                            else None
+                        ),
                     }
 
             elif share_data["content_type"] == 2:  # Event
-                event_query = select(
-                    table["event"].c.id,
-                    table["event"].c.title,
-                    table["event"].c.description,
-                    table["event"].c.event_date,
-                    table["event"].c.created_date,
-                    table["organization"].c.name.label("organization_name")
-                ).select_from(
-                    table["event"].join(
-                        table["organization"],
-                        table["event"].c.organization_id == table["organization"].c.id
+                event_query = (
+                    select(
+                        table["event"].c.id,
+                        table["event"].c.organization_id,
+                        table["event"].c.title,
+                        table["event"].c.description,
+                        table["event"].c.event_date,
+                        table["event"].c.created_date,
+                        table["event"].c.image,
+                        table["resource"].c.directory.label("image_directory"),
+                        table["resource"].c.filename.label("image_filename"),
+                        table["address"].c.province.label("address_province"),
+                        table["address"].c.city.label("address_city"),
+                        table["address"].c.barangay.label("address_barangay"),
+                        table["organization"].c.name.label("organization_name"),
                     )
-                ).where(table["event"].c.id == share_data["content_id"])
+                    .select_from(
+                        table["event"]
+                        .outerjoin(
+                            table["resource"], table["event"].c.image == table["resource"].c.id
+                        )
+                        .outerjoin(
+                            table["address"], table["event"].c.address_id == table["address"].c.id
+                        )
+                        .join(
+                            table["organization"],
+                            table["event"].c.organization_id == table["organization"].c.id,
+                        )
+                    )
+                    .where(table["event"].c.id == share_data["content_id"])
+                )
                 
                 event_result = session.execute(event_query).fetchone()
                 if event_result:
@@ -223,8 +338,39 @@ async def get_user_shares(
                         "description": event_result.description,
                         "event_date": event_result.event_date,
                         "created_date": event_result.created_date,
-                        "organization_name": event_result.organization_name
+                        "organization_name": event_result.organization_name,
+                        "organization_id": event_result.organization_id,
+                        "image": (
+                            {
+                                "id": event_result.image,
+                                "directory": event_result.image_directory,
+                                "filename": event_result.image_filename,
+                            }
+                            if event_result.image
+                            else None
+                        ),
+                        "address": {
+                            "province": event_result.address_province,
+                            "city": event_result.address_city,
+                            "barangay": event_result.address_barangay,
+                        },
                     }
+                    if account_id:
+                        user_id_stmt = select(table["user"].c.id).where(
+                            table["user"].c.account_id == account_id
+                        )
+                        user_id = session.execute(user_id_stmt).scalar()
+                        org_id = event_result.organization_id
+                        membership_status = None
+                        print("data", user_id, org_id)
+                        if user_id and org_id:
+                            membership_stmt = select(table["membership"].c.status).where(
+                                (table["membership"].c.organization_id == org_id)
+                                & (table["membership"].c.user_id == user_id)
+                            )
+                            membership_status = session.execute(membership_stmt).scalar()
+                        print("membership status", membership_status)
+                        share_data["content_details"]["user_membership_status_with_organizer"] = membership_status
 
             shares.append(share_data)
 
@@ -254,6 +400,9 @@ async def get_shares_for_content(
     limit: int = Query(10, ge=1, le=50, description="Items per page"),
 ):
     try:
+
+        session = db.session
+
         # Validate content_type
         if content_type not in [1, 2]:
             raise HTTPException(status_code=400, detail="Content type must be 1 (post) or 2 (event)")
@@ -318,7 +467,7 @@ async def get_shares_for_content(
             })
 
         return {
-            "content_type": content_name,
+            "content_type": content_type,
             "content_id": content_id,
             "shares": shares,
             "pagination": {
@@ -336,12 +485,12 @@ async def get_shares_for_content(
     finally:
         session.close()
 
-
 @router.get("/all_with_comments", tags=["Get All Shares With Comments"])
 async def get_all_shares_with_comments(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(10, ge=1, le=50, description="Items per page"),
     content_type: Optional[int] = Query(None, description="Filter by content type: 1 for posts, 2 for events"),
+    session_token: str = Cookie(None, alias="session_token"),
 ):
     """
     Get all shared content (posts and events) with comments for news feed
@@ -349,6 +498,20 @@ async def get_all_shares_with_comments(
     session = db.session
     try:
         offset = (page - 1) * limit
+        user_id = None
+        if session_token:
+            try:
+                account_uuid = get_account_uuid_from_session(session_token)
+                select_account = select(table["account"].c.id).where(
+                    table["account"].c.uuid == account_uuid
+                )
+                account_id = session.execute(select_account).scalar()
+                select_user = select(table["user"].c.id).where(
+                    table["user"].c.account_id == account_id
+                )
+                user_id = session.execute(select_user).scalar()
+            except Exception:
+                user_id = None
 
         # Build base query for shares
         base_query = select(table["shares"])
@@ -487,8 +650,10 @@ async def get_all_shares_with_comments(
 
             elif share_data["content_type"] == 2:  # Event
                 # Get event details with organization info
+                org_logo_resource = table["resource"].alias("org_logo_resource")
                 event_query = select(
                     table["event"].c.id,
+                    table["event"].c.organization_id,
                     table["event"].c.title,
                     table["event"].c.description,
                     table["event"].c.event_date,
@@ -496,6 +661,8 @@ async def get_all_shares_with_comments(
                     table["event"].c.created_date,
                     table["organization"].c.name.label("organization_name"),
                     table["organization"].c.category.label("organization_category"),
+                    org_logo_resource.c.directory.label("organization_logo_directory"),
+                    org_logo_resource.c.filename.label("organization_logo_filename"),
                     table["address"].c.country,
                     table["address"].c.province,
                     table["address"].c.city,
@@ -506,6 +673,7 @@ async def get_all_shares_with_comments(
                 ).select_from(
                     table["event"]
                     .join(table["organization"], table["event"].c.organization_id == table["organization"].c.id)
+                    .outerjoin(org_logo_resource, table["organization"].c.logo == org_logo_resource.c.id)
                     .outerjoin(table["address"], table["event"].c.address_id == table["address"].c.id)
                     .outerjoin(table["resource"], table["event"].c.image == table["resource"].c.id)
                 ).where(table["event"].c.id == share_data["content_id"])
@@ -515,26 +683,45 @@ async def get_all_shares_with_comments(
                     content_details = {
                         "type": "event",
                         "id": event_result.id,
+                        "organization_id": event_result.organization_id,
                         "title": event_result.title,
                         "description": event_result.description,
                         "event_date": event_result.event_date,
                         "created_date": event_result.created_date,
-                        "image": {
-                            "directory": event_result.event_image_directory,
-                            "filename": event_result.event_image_filename
-                        } if event_result.event_image_directory else None,
+                        "image": (
+                            {
+                                "directory": event_result.event_image_directory,
+                                "filename": event_result.event_image_filename,
+                            }
+                            if event_result.event_image_directory
+                            else None
+                        ),
                         "organization": {
                             "name": event_result.organization_name,
-                            "category": event_result.organization_category
+                            "category": event_result.organization_category,
+                            "logo": (
+                                {
+                                    "directory": event_result.organization_logo_directory,
+                                    "filename": event_result.organization_logo_filename,
+                                }
+                                if event_result.organization_logo_directory
+                                else None
+                            ),
+                            "address": {
+                                "province": event_result.province,
+                                "city": event_result.city,
+                                "barangay": event_result.barangay,
+                            },
                         },
-                        "address": {
-                            "country": event_result.country,
-                            "province": event_result.province,
-                            "city": event_result.city,
-                            "barangay": event_result.barangay,
-                            "house_building_number": event_result.house_building_number
-                        }
                     }
+                    if user_id and event_result.organization_id:
+                        membership_status = session.execute(
+                            select(table["membership"].c.status).where(
+                                (table["membership"].c.organization_id == event_result.organization_id)
+                                & (table["membership"].c.user_id == user_id)
+                            )
+                        ).scalar()
+                        content_details["organization"]["user_membership_status_with_organizer"] = membership_status
                     
                     # Get event comments (top 5 latest)
                     comments_query = select(
