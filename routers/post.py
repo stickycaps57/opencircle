@@ -156,6 +156,10 @@ async def get_all_posts(
                 table["post"].c.created_date,
                 table["account"].c.uuid.label("author_uuid"),
                 table["account"].c.email.label("author_email"),
+                table["organization"].c.name.label("organization_name"),
+                org_logo_resource.c.directory.label("organization_logo_directory"),
+                org_logo_resource.c.filename.label("organization_logo_filename"),
+                org_logo_resource.c.id.label("organization_logo_id"),
                 table["user"].c.first_name.label("author_first_name"),
                 table["user"].c.last_name.label("author_last_name"),
                 table["user"].c.bio.label("author_bio"),
@@ -169,6 +173,13 @@ async def get_all_posts(
                 .join(table["account"], table["post"].c.author == table["account"].c.id)
                 .outerjoin(
                     table["user"], table["user"].c.account_id == table["account"].c.id
+                )
+                .outerjoin(
+                    table["organization"], table["organization"].c.account_id == table["account"].c.id
+                )
+                .outerjoin(
+                    org_logo_resource,
+                    table["organization"].c.logo == org_logo_resource.c.id,
                 )
                 .outerjoin(
                     profile_resource,
@@ -345,6 +356,7 @@ async def get_all_posts(
                     "author_first_name": data["author_first_name"],
                     "author_last_name": data["author_last_name"],
                     "author_bio": data["author_bio"],
+                    "author_organization_name": data["organization_name"],
                     "author_profile_picture": (
                         {
                             "id": data["author_profile_picture_id"],
@@ -352,6 +364,15 @@ async def get_all_posts(
                             "filename": data["author_profile_picture_filename"],
                         }
                         if data["author_profile_picture_id"]
+                        else None
+                    ),
+                    "author_logo": (
+                        {
+                           "id": data["organization_logo_id"],
+                            "directory": data["organization_logo_directory"],
+                            "filename": data["organization_logo_filename"],
+                        }
+                        if data["organization_logo_id"]
                         else None
                     ),
                     "images": images,
@@ -590,6 +611,10 @@ async def get_posts_with_comments(
                 table["post"].c.last_modified_date,
                 table["account"].c.uuid.label("author_uuid"),
                 table["account"].c.email.label("author_email"),
+                table["organization"].c.name.label("organization_name"),
+                org_logo_resource.c.directory.label("organization_logo_directory"),
+                org_logo_resource.c.filename.label("organization_logo_filename"),
+                org_logo_resource.c.id.label("organization_logo_id"),
                 table["user"].c.first_name.label("author_first_name"),
                 table["user"].c.last_name.label("author_last_name"),
                 table["user"].c.bio.label("author_bio"),
@@ -605,6 +630,13 @@ async def get_posts_with_comments(
                     table["user"], table["user"].c.account_id == table["account"].c.id
                 )
                 .outerjoin(
+                    table["organization"], table["organization"].c.account_id == table["account"].c.id
+                )
+                .outerjoin(
+                    org_logo_resource,
+                    table["organization"].c.logo == org_logo_resource.c.id,
+                )
+                .outerjoin(
                     profile_resource,
                     table["user"].c.profile_picture == profile_resource.c.id,
                 )
@@ -616,9 +648,12 @@ async def get_posts_with_comments(
         )
         posts_result = session.execute(post_stmt).fetchall()
         if not posts_result:
-            raise HTTPException(
-                status_code=404, detail="No posts found for this account"
-            )
+            return {
+                "page": page,
+                "page_size": page_size,
+                "posts": [],
+                "total": total_count,
+            }
 
         posts = []
         for row in posts_result:
@@ -788,6 +823,7 @@ async def get_posts_with_comments(
                 "first_name": post_dict["author_first_name"],
                 "last_name": post_dict["author_last_name"],
                 "bio": post_dict["author_bio"],
+                "organization_name": post_dict["organization_name"],
                 "profile_picture": (
                     {
                         "id": post_dict["author_profile_picture_id"],
@@ -795,6 +831,15 @@ async def get_posts_with_comments(
                         "filename": post_dict["author_profile_picture_filename"],
                     }
                     if post_dict["author_profile_picture_id"]
+                    else None
+                ),
+                "logo": (
+                    {
+                        "id": post_dict["organization_logo_id"],
+                        "directory": post_dict["organization_logo_directory"],
+                        "filename": post_dict["organization_logo_filename"],
+                    }
+                    if post_dict["organization_logo_id"]
                     else None
                 ),
             }
@@ -805,6 +850,10 @@ async def get_posts_with_comments(
             post_dict.pop("author_first_name", None)
             post_dict.pop("author_last_name", None)
             post_dict.pop("author_bio", None)
+            post_dict.pop("organization_name", None)
+            post_dict.pop("organization_logo_id", None)
+            post_dict.pop("organization_logo_directory", None)
+            post_dict.pop("organization_logo_filename", None)
             post_dict.pop("author_profile_picture", None)
             post_dict.pop("author_profile_picture_id", None)
             post_dict.pop("author_profile_picture_directory", None)
@@ -896,6 +945,16 @@ async def update_post(
             
             # Store resource_ids as JSON string if not empty, else None
             update_values["image"] = json.dumps(resource_ids) if resource_ids else None
+        else:
+            existing_images = post.image
+            if existing_images:
+                try:
+                    existing_resource_ids = json.loads(existing_images)
+                    for resource_id in existing_resource_ids:
+                        delete_resource(resource_id, account_uuid)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            update_values["image"] = None
 
         if not update_values:
             raise HTTPException(status_code=400, detail="No update fields provided")
