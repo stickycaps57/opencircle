@@ -1,16 +1,17 @@
 from sqlalchemy import create_engine, MetaData, Table, Engine
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Dict
+import os
 
 
 def get_db_config() -> Dict[str, str]:
-    # TODO: Get credential from secret manager
+    # Use environment variables for production, fallback to local for development
     return {
-        "username": "root",
-        "password": "password",
-        "host": "192.168.100.25",
-        "port": "3306",
-        "database": "opencircle",
+        "username": os.getenv("DB_USERNAME", "root"),
+        "password": os.getenv("DB_PASSWORD", "password"),
+        "host": os.getenv("DB_HOST", "192.168.100.25"),
+        "port": os.getenv("DB_PORT", "3306"),
+        "database": os.getenv("DB_NAME", "opencircle"),
     }
 
 
