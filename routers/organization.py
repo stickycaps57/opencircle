@@ -454,6 +454,138 @@ async def get_user_memberships(account_uuid: str):
         session.close()
 
 
+@router.get("/user/joined", tags=["Get User Joined Organizations"])
+async def get_user_joined_organizations(
+    account_uuid: str,
+    session_token: str = Cookie(None, alias="session_token"),
+):
+    """
+    Get all organizations that a user has joined (approved membership)
+    """
+    session = db.session
+    
+    # Validate session token if provided (optional for this endpoint)
+    if session_token:
+        session_account_uuid = get_account_uuid_from_session(session_token)
+        if not session_account_uuid:
+            raise HTTPException(status_code=401, detail="Invalid session token")
+    
+    try:
+        # Get user_id by joining user and account tables
+        user = (
+            session.query(table["user"])
+            .join(table["account"], table["user"].c.account_id == table["account"].c.id)
+            .filter(table["account"].c.uuid == account_uuid)
+            .first()
+        )
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        user_id = user.id
+        
+        # Get all organizations the user has joined (approved membership)
+        joined_organizations_query = (
+            session.query(
+                table["organization"].c.id,
+                table["organization"].c.name,
+                table["organization"].c.description,
+                table["organization"].c.category,
+                table["organization"].c.logo,
+                table["organization"].c.created_date.label("organization_created_date"),
+                table["membership"].c.created_date.label("membership_date"),
+                table["membership"].c.last_modified_date.label("membership_modified_date"),
+                table["account"].c.uuid.label("organization_account_uuid"),
+                table["account"].c.email.label("organization_email"),
+                table["resource"].c.directory.label("logo_directory"),
+                table["resource"].c.filename.label("logo_filename"),
+                table["resource"].c.id.label("logo_id"),
+            )
+            .join(
+                table["membership"], 
+                table["organization"].c.id == table["membership"].c.organization_id
+            )
+            .join(
+                table["account"],
+                table["organization"].c.account_id == table["account"].c.id
+            )
+            .outerjoin(
+                table["resource"],
+                table["organization"].c.logo == table["resource"].c.id
+            )
+            .filter(
+                table["membership"].c.user_id == user_id,
+                table["membership"].c.status == "approved"
+            )
+            .order_by(table["membership"].c.created_date.desc())
+        )
+        
+        joined_organizations_result = joined_organizations_query.all()
+        
+        organizations = []
+        for org in joined_organizations_result:
+            # Get member count for each organization
+            member_count_stmt = (
+                select(func.count())
+                .select_from(table["membership"])
+                .where(
+                    table["membership"].c.organization_id == org.id,
+                    table["membership"].c.status == "approved"
+                )
+            )
+            member_count = session.execute(member_count_stmt).scalar()
+            
+            # Get recent events count (last 30 days)
+            from datetime import datetime, timedelta
+            thirty_days_ago = datetime.now() - timedelta(days=30)
+            
+            recent_events_count_stmt = (
+                select(func.count())
+                .select_from(table["event"])
+                .where(
+                    table["event"].c.organization_id == org.id,
+                    table["event"].c.created_date >= thirty_days_ago
+                )
+            )
+            recent_events_count = session.execute(recent_events_count_stmt).scalar()
+            
+            organization_data = {
+                "id": org.id,
+                "name": org.name,
+                "description": org.description,
+                "category": org.category,
+                "logo": {
+                    "id": org.logo_id,
+                    "directory": org.logo_directory,
+                    "filename": org.logo_filename
+                } if org.logo_id else None,
+                "organization_created_date": org.organization_created_date,
+                "membership_date": org.membership_date,
+                "membership_modified_date": org.membership_modified_date,
+                "account_uuid": org.organization_account_uuid,
+                "email": org.organization_email,
+                "stats": {
+                    "member_count": member_count,
+                    "recent_events_count": recent_events_count
+                }
+            }
+            organizations.append(organization_data)
+
+        return {
+            "user_account_uuid": account_uuid,
+            "joined_organizations_count": len(organizations),
+            "organizations": organizations
+        }
+        
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
 @router.get("/pending-membership", tags=["Get Pending Membership Organization"])
 async def get_pending_membership_organization(account_uuid: str):
     session = db.session
