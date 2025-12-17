@@ -737,6 +737,7 @@ async def get_post_comment_analytics(
             raise HTTPException(status_code=404, detail="Organization not found")
         
         organization_id = org.id
+        organization_account_id = org.account_id
 
         # Build date filter conditions for comments
         comment_conditions = []
@@ -765,7 +766,7 @@ async def get_post_comment_analytics(
                     )
                 )
             )
-            .where(table["post"].c.author == organization_id)
+            .where(table["post"].c.author == organization_account_id)
             .group_by(
                 table["post"].c.id,
                 table["post"].c.description,
@@ -976,6 +977,7 @@ async def get_comment_analytics_summary(
             raise HTTPException(status_code=404, detail="Organization not found")
         
         organization_id = org.id
+        organization_account_id = org.account_id
 
         # Build date filter conditions for comments
         comment_conditions = []
@@ -1000,7 +1002,7 @@ async def get_comment_analytics_summary(
                     )
                 )
             )
-            .where(table["post"].c.author == organization_id)
+            .where(table["post"].c.author == organization_account_id)
         )
 
         # Get posts with comments count separately
@@ -1018,7 +1020,7 @@ async def get_comment_analytics_summary(
                     )
                 )
             )
-            .where(table["post"].c.author == organization_id)
+            .where(table["post"].c.author == organization_account_id)
         )
 
         post_result = session.execute(post_summary_query).fetchone()
@@ -1083,7 +1085,7 @@ async def get_comment_analytics_summary(
             )
             .where(
                 and_(
-                    table["post"].c.author == organization_id,
+                    table["post"].c.author == organization_account_id,
                     *trends_conditions
                 )
             )
