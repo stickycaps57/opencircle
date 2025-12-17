@@ -1075,9 +1075,21 @@ async def search_organizations(query: str):
 
 
 @router.get("/{organization_id}", tags=["Get Organization Details"])
-async def get_organization_by_id(organization_id: int = Path(...)):
+async def get_organization_by_id(
+    organization_id: int = Path(...),
+    session_token: str = Cookie(None, alias="session_token"),
+):
     session = db.session
     try:
+        # First, check if organization exists at all
+        org_exists_stmt = select(table["organization"].c.id).where(
+            table["organization"].c.id == organization_id
+        )
+        org_exists = session.execute(org_exists_stmt).scalar()
+        
+        if not org_exists:
+            raise HTTPException(status_code=404, detail=f"Organization with ID {organization_id} not found")
+
         # Get organization details by joining with account and resource tables
         org_stmt = (
             select(
@@ -1095,7 +1107,7 @@ async def get_organization_by_id(organization_id: int = Path(...)):
             )
             .select_from(
                 table["organization"]
-                .join(
+                .outerjoin(  # Changed from join to outerjoin
                     table["account"],
                     table["organization"].c.account_id == table["account"].c.id,
                 )
@@ -1109,12 +1121,44 @@ async def get_organization_by_id(organization_id: int = Path(...)):
 
         org_result = session.execute(org_stmt).first()
         if not org_result:
-            raise HTTPException(status_code=404, detail="Organization not found")
+            raise HTTPException(status_code=404, detail=f"Organization data could not be retrieved for ID {organization_id}")
 
         organization = org_result._mapping
 
-        # Return organization details in the same format as in account.py
-        return {
+        # Get user's membership status if session_token is provided
+        user_membership_status = None
+        if session_token:
+            try:
+                # Get account_uuid from session
+                account_uuid = get_account_uuid_from_session(session_token)
+                
+                # Get user_id from account_uuid
+                user_stmt = (
+                    select(table["user"].c.id)
+                    .select_from(
+                        table["user"]
+                        .join(table["account"], table["user"].c.account_id == table["account"].c.id)
+                    )
+                    .where(table["account"].c.uuid == account_uuid)
+                )
+                user_result = session.execute(user_stmt).scalar()
+                
+                if user_result:
+                    # Check membership status
+                    membership_stmt = (
+                        select(table["membership"].c.status)
+                        .where(
+                            (table["membership"].c.organization_id == organization_id) &
+                            (table["membership"].c.user_id == user_result)
+                        )
+                    )
+                    user_membership_status = session.execute(membership_stmt).scalar()
+            except Exception:
+                # If there's any error getting membership status, just continue without it
+                pass
+
+        # Return organization details with membership status
+        response = {
             "id": organization["id"],
             "account_id": organization["account_id"],
             "name": organization["name"],
@@ -1133,6 +1177,12 @@ async def get_organization_by_id(organization_id: int = Path(...)):
             "uuid": organization["uuid"],
             "role_id": organization["role_id"],
         }
+        
+        # Only add membership_status if we have a session token (indicating a user is viewing)
+        if session_token:
+            response["user_membership_status"] = user_membership_status
+            
+        return response
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
