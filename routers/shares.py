@@ -431,20 +431,30 @@ async def get_shares_for_content(
         total_count = session.execute(count_query).scalar()
 
         # Get shares with user details
+        org_logo_resource = table["resource"].alias("org_logo_resource")
+        profile_picture_resource = table["resource"].alias("profile_picture_resource")
         shares_query = select(
             table["shares"].c.id,
             table["shares"].c.comment,
             table["shares"].c.date_created,
             table["account"].c.uuid.label("sharer_uuid"),
             table["account"].c.email.label("sharer_email"),
+            table["user"].c.id.label("sharer_id"),
             table["user"].c.first_name,
             table["user"].c.last_name,
-            table["organization"].c.name.label("organization_name")
+            table["organization"].c.id.label("organization_id"),
+            table["organization"].c.name.label("organization_name"),
+            org_logo_resource.c.directory.label("organization_logo_directory"),
+            org_logo_resource.c.filename.label("organization_logo_filename"),
+            profile_picture_resource.c.directory.label("profile_picture_directory"),
+            profile_picture_resource.c.filename.label("profile_picture_filename")
         ).select_from(
             table["shares"]
             .join(table["account"], table["shares"].c.account_uuid == table["account"].c.uuid)
             .outerjoin(table["user"], table["user"].c.account_id == table["account"].c.id)
+            .outerjoin(profile_picture_resource, table["user"].c.profile_picture == profile_picture_resource.c.id)
             .outerjoin(table["organization"], table["organization"].c.account_id == table["account"].c.id)
+            .outerjoin(org_logo_resource, table["organization"].c.logo == org_logo_resource.c.id)
         ).where(
             (table["shares"].c.content_id == content_id) &
             (table["shares"].c.content_type == content_type)
@@ -461,11 +471,21 @@ async def get_shares_for_content(
                 "comment": share.comment,
                 "date_created": share.date_created,
                 "sharer": {
+                    "id": share.sharer_id,
+                    "organization_id": share.organization_id,
                     "uuid": share.sharer_uuid,
                     "email": share.sharer_email,
                     "first_name": share.first_name,
                     "last_name": share.last_name,
                     "organization_name": share.organization_name,
+                    "profile_picture": {
+                        "directory": share.profile_picture_directory,
+                        "filename": share.profile_picture_filename
+                    } if share.profile_picture_directory else None,
+                    "logo": {
+                        "directory": share.organization_logo_directory,
+                        "filename": share.organization_logo_filename
+                    } if share.organization_logo_directory else None
                 }
             })
 
@@ -542,20 +562,27 @@ async def get_all_shares_with_comments(
             share_data = dict(share._mapping)
             
             # Get sharer details
+            org_logo_resource = table["resource"].alias("org_logo_resource")
+            profile_picture_resource = table["resource"].alias("profile_picture_resource")
             sharer_query = select(
                 table["account"].c.uuid,
                 table["account"].c.email,
+                table["user"].c.id.label("sharer_id"),
                 table["user"].c.first_name,
                 table["user"].c.last_name,
                 table["user"].c.profile_picture,
-                table["resource"].c.directory.label("profile_picture_directory"),
-                table["resource"].c.filename.label("profile_picture_filename"),
-                table["organization"].c.name.label("org_name")
+                profile_picture_resource.c.directory.label("profile_picture_directory"),
+                profile_picture_resource.c.filename.label("profile_picture_filename"),
+                table["organization"].c.name.label("organization_name"),
+                table["organization"].c.id.label("organization_id"),
+                org_logo_resource.c.directory.label("organization_logo_directory"),
+                org_logo_resource.c.filename.label("organization_logo_filename")
             ).select_from(
                 table["account"]
                 .outerjoin(table["user"], table["user"].c.account_id == table["account"].c.id)
                 .outerjoin(table["organization"], table["organization"].c.account_id == table["account"].c.id)
-                .outerjoin(table["resource"], table["user"].c.profile_picture == table["resource"].c.id)
+                .outerjoin(profile_picture_resource, table["user"].c.profile_picture == profile_picture_resource.c.id)
+                .outerjoin(org_logo_resource, table["organization"].c.logo == org_logo_resource.c.id)
             ).where(table["account"].c.uuid == share_data["account_uuid"])
             
             sharer_result = session.execute(sharer_query).first()
@@ -565,6 +592,7 @@ async def get_all_shares_with_comments(
             
             if share_data["content_type"] == 1:  # Post
                 # Get post details with author info
+                org_logo_resource = table["resource"].alias("org_logo_resource")
                 post_query = select(
                     table["post"].c.id,
                     table["post"].c.description,
@@ -576,12 +604,18 @@ async def get_all_shares_with_comments(
                     table["user"].c.last_name.label("author_last_name"),
                     table["user"].c.profile_picture.label("author_profile_picture"),
                     table["resource"].c.directory.label("author_profile_directory"),
-                    table["resource"].c.filename.label("author_profile_filename")
+                    table["resource"].c.filename.label("author_profile_filename"),
+                    table["organization"].c.id.label("author_organization_id"),
+                    table["organization"].c.name.label("author_organization_name"),
+                    org_logo_resource.c.directory.label("author_organization_logo_directory"),
+                    org_logo_resource.c.filename.label("author_organization_logo_filename")
                 ).select_from(
                     table["post"]
                     .join(table["account"], table["post"].c.author == table["account"].c.id)
                     .outerjoin(table["user"], table["user"].c.account_id == table["account"].c.id)
                     .outerjoin(table["resource"], table["user"].c.profile_picture == table["resource"].c.id)
+                    .outerjoin(table["organization"], table["organization"].c.account_id == table["account"].c.id)
+                    .outerjoin(org_logo_resource, table["organization"].c.logo == org_logo_resource.c.id)
                 ).where(table["post"].c.id == share_data["content_id"])
                 
                 post_result = session.execute(post_query).first()
@@ -614,10 +648,16 @@ async def get_all_shares_with_comments(
                             "email": post_result.author_email,
                             "first_name": post_result.author_first_name,
                             "last_name": post_result.author_last_name,
+                            "organization_id": post_result.author_organization_id,
+                            "organization_name": post_result.author_organization_name,
                             "profile_picture": {
                                 "directory": post_result.author_profile_directory,
                                 "filename": post_result.author_profile_filename
-                            } if post_result.author_profile_directory else None
+                            } if post_result.author_profile_directory else None,
+                            "organization_logo": {
+                                "directory": post_result.author_organization_logo_directory,
+                                "filename": post_result.author_organization_logo_filename
+                            } if post_result.author_organization_logo_directory else None,
                         }
                     }
                     
@@ -763,15 +803,21 @@ async def get_all_shares_with_comments(
                     "share_comment": share_data["comment"],
                     "share_date": share_data["date_created"],
                     "sharer": {
+                        "id": sharer_result.sharer_id,
+                        "organization_id": sharer_result.organization_id,
                         "uuid": sharer_result.uuid,
                         "email": sharer_result.email,
                         "first_name": sharer_result.first_name,
                         "last_name": sharer_result.last_name,
-                        "org_name": sharer_result.org_name,
+                        "organization_name": sharer_result.organization_name,
                         "profile_picture": {
                             "directory": sharer_result.profile_picture_directory,
                             "filename": sharer_result.profile_picture_filename
-                        } if sharer_result.profile_picture_directory else None
+                        } if sharer_result.profile_picture_directory else None,
+                        "logo": {
+                            "directory": sharer_result.organization_logo_directory,
+                            "filename": sharer_result.organization_logo_filename
+                        } if sharer_result.organization_logo_directory else None
                     },
                     "content": content_details,
                     "comments": comments,
