@@ -190,6 +190,61 @@ async def get_user_shares(
         for share in shares_result:
             share_data = dict(share._mapping)
             
+            # Get sharer details (logo and profile picture)
+            org_logo_resource = table["resource"].alias("org_logo_resource")
+            profile_picture_resource = table["resource"].alias("profile_picture_resource")
+            sharer_query = select(
+                table["account"].c.uuid,
+                table["account"].c.email,
+                table["user"].c.id.label("sharer_id"),
+                table["user"].c.first_name,
+                table["user"].c.last_name,
+                table["user"].c.profile_picture,
+                profile_picture_resource.c.directory.label("profile_picture_directory"),
+                profile_picture_resource.c.filename.label("profile_picture_filename"),
+                table["organization"].c.name.label("organization_name"),
+                table["organization"].c.id.label("organization_id"),
+                org_logo_resource.c.directory.label("organization_logo_directory"),
+                org_logo_resource.c.filename.label("organization_logo_filename")
+            ).select_from(
+                table["account"]
+                .outerjoin(table["user"], table["user"].c.account_id == table["account"].c.id)
+                .outerjoin(table["organization"], table["organization"].c.account_id == table["account"].c.id)
+                .outerjoin(profile_picture_resource, table["user"].c.profile_picture == profile_picture_resource.c.id)
+                .outerjoin(org_logo_resource, table["organization"].c.logo == org_logo_resource.c.id)
+            ).where(table["account"].c.uuid == share_data["account_uuid"])
+            
+            sharer_result = session.execute(sharer_query).first()
+            
+            # Add sharer information to share_data
+            if sharer_result:
+                share_data["sharer"] = {
+                    "id": sharer_result.sharer_id,
+                    "organization_id": sharer_result.organization_id,
+                    "uuid": sharer_result.uuid,
+                    "email": sharer_result.email,
+                    "first_name": sharer_result.first_name,
+                    "last_name": sharer_result.last_name,
+                    "organization_name": sharer_result.organization_name,
+                    "profile_picture": {
+                        "directory": sharer_result.profile_picture_directory,
+                        "filename": sharer_result.profile_picture_filename
+                    } if sharer_result.profile_picture_directory else None,
+                    "logo": {
+                        "directory": sharer_result.organization_logo_directory,
+                        "filename": sharer_result.organization_logo_filename
+                    } if sharer_result.organization_logo_directory else None
+                }
+                
+                # Add RSVP status for events if the sharer is a user and content is an event
+                if share_data["content_type"] == 2 and account_id:  # Event content type
+                    rsvp_status_stmt = select(table["rsvp"].c.status).where(
+                        (table["rsvp"].c.event_id == share_data["content_id"]) &
+                        (table["rsvp"].c.attendee == account_id)
+                    )
+                    rsvp_status = session.execute(rsvp_status_stmt).scalar()
+                    share_data["sharer"]["rsvp_status"] = rsvp_status
+            
             # Get content details based on content_type
             if share_data["content_type"] == 1:  # Post
                 profile_resource = table["resource"].alias("profile_resource")
@@ -371,15 +426,6 @@ async def get_user_shares(
                             membership_status = session.execute(membership_stmt).scalar()
                         print("membership status", membership_status)
                         share_data["content_details"]["user_membership_status_with_organizer"] = membership_status
-                    
-                    # Get RSVP status of the sharer for this event if they are a user
-                    if account_id:
-                        rsvp_status_stmt = select(table["rsvp"].c.status).where(
-                            (table["rsvp"].c.event_id == share_data["content_id"]) &
-                            (table["rsvp"].c.attendee == account_id)
-                        )
-                        rsvp_status = session.execute(rsvp_status_stmt).scalar()
-                        share_data["content_details"]["sharer_rsvp_status"] = rsvp_status
 
             shares.append(share_data)
 
