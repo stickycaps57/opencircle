@@ -371,6 +371,15 @@ async def get_user_shares(
                             membership_status = session.execute(membership_stmt).scalar()
                         print("membership status", membership_status)
                         share_data["content_details"]["user_membership_status_with_organizer"] = membership_status
+                    
+                    # Get RSVP status of the sharer for this event if they are a user
+                    if account_id:
+                        rsvp_status_stmt = select(table["rsvp"].c.status).where(
+                            (table["rsvp"].c.event_id == share_data["content_id"]) &
+                            (table["rsvp"].c.attendee == account_id)
+                        )
+                        rsvp_status = session.execute(rsvp_status_stmt).scalar()
+                        share_data["content_details"]["sharer_rsvp_status"] = rsvp_status
 
             shares.append(share_data)
 
@@ -466,7 +475,7 @@ async def get_shares_for_content(
 
         shares = []
         for share in shares_result:
-            shares.append({
+            share_data = {
                 "share_id": share.id,
                 "comment": share.comment,
                 "date_created": share.date_created,
@@ -487,7 +496,25 @@ async def get_shares_for_content(
                         "filename": share.organization_logo_filename
                     } if share.organization_logo_directory else None
                 }
-            })
+            }
+            
+            # If this is an event share, get the RSVP status of the sharer
+            if content_type == 2 and share.sharer_id:  # Event and sharer is a user
+                # Get account_id from sharer_id
+                sharer_account_stmt = select(table["user"].c.account_id).where(
+                    table["user"].c.id == share.sharer_id
+                )
+                sharer_account_id = session.execute(sharer_account_stmt).scalar()
+                
+                if sharer_account_id:
+                    rsvp_status_stmt = select(table["rsvp"].c.status).where(
+                        (table["rsvp"].c.event_id == content_id) &
+                        (table["rsvp"].c.attendee == sharer_account_id)
+                    )
+                    rsvp_status = session.execute(rsvp_status_stmt).scalar()
+                    share_data["sharer"]["rsvp_status"] = rsvp_status
+            
+            shares.append(share_data)
 
         return {
             "content_type": content_type,
@@ -798,27 +825,45 @@ async def get_all_shares_with_comments(
 
             # Only add to results if we have content details
             if content_details and sharer_result:
+                sharer_data = {
+                    "id": sharer_result.sharer_id,
+                    "organization_id": sharer_result.organization_id,
+                    "uuid": sharer_result.uuid,
+                    "email": sharer_result.email,
+                    "first_name": sharer_result.first_name,
+                    "last_name": sharer_result.last_name,
+                    "organization_name": sharer_result.organization_name,
+                    "profile_picture": {
+                        "directory": sharer_result.profile_picture_directory,
+                        "filename": sharer_result.profile_picture_filename
+                    } if sharer_result.profile_picture_directory else None,
+                    "logo": {
+                        "directory": sharer_result.organization_logo_directory,
+                        "filename": sharer_result.organization_logo_filename
+                    } if sharer_result.organization_logo_directory else None
+                }
+                
+                # If this is an event share and the sharer is a user, get their RSVP status
+                if share_data["content_type"] == 2 and sharer_result.sharer_id:
+                    # Get account_id from sharer_id
+                    sharer_account_stmt = select(table["user"].c.account_id).where(
+                        table["user"].c.id == sharer_result.sharer_id
+                    )
+                    sharer_account_id = session.execute(sharer_account_stmt).scalar()
+                    
+                    if sharer_account_id:
+                        rsvp_status_stmt = select(table["rsvp"].c.status).where(
+                            (table["rsvp"].c.event_id == share_data["content_id"]) &
+                            (table["rsvp"].c.attendee == sharer_account_id)
+                        )
+                        rsvp_status = session.execute(rsvp_status_stmt).scalar()
+                        sharer_data["rsvp_status"] = rsvp_status
+
                 shares_with_content.append({
                     "share_id": share_data["id"],
                     "share_comment": share_data["comment"],
                     "share_date": share_data["date_created"],
-                    "sharer": {
-                        "id": sharer_result.sharer_id,
-                        "organization_id": sharer_result.organization_id,
-                        "uuid": sharer_result.uuid,
-                        "email": sharer_result.email,
-                        "first_name": sharer_result.first_name,
-                        "last_name": sharer_result.last_name,
-                        "organization_name": sharer_result.organization_name,
-                        "profile_picture": {
-                            "directory": sharer_result.profile_picture_directory,
-                            "filename": sharer_result.profile_picture_filename
-                        } if sharer_result.profile_picture_directory else None,
-                        "logo": {
-                            "directory": sharer_result.organization_logo_directory,
-                            "filename": sharer_result.organization_logo_filename
-                        } if sharer_result.organization_logo_directory else None
-                    },
+                    "sharer": sharer_data,
                     "content": content_details,
                     "comments": comments,
                     "comments_count": len(comments)
