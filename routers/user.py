@@ -98,6 +98,7 @@ async def get_user_profile(
                 table["user"].c.bio,
                 table["user"].c.created_date,
                 table["user"].c.profile_picture,
+                table["user"].c.id.label("user_id"),
                 profile_resource.c.directory.label("profile_picture_directory"),
                 profile_resource.c.filename.label("profile_picture_filename"),
                 profile_resource.c.id.label("profile_picture_id"),
@@ -122,6 +123,27 @@ async def get_user_profile(
         user_data = user_result._mapping
         account_id = user_data["account_id"]
         
+        # get the membership status of the organization visitor
+        organizer_view_user_membership = None
+        if session_token:
+            try:
+                membership_stmt = (
+                    select(table["membership"].c.status)
+                    .select_from(
+                        table["membership"]
+                        .join(table["organization"], table["membership"].c.organization_id == table["organization"].c.id)
+                        .join(table["account"], table["organization"].c.account_id == table["account"].c.id)
+                    )
+                    .where(
+                        (table["account"].c.uuid == session_account_uuid) &
+                        (table["membership"].c.user_id == user_data["user_id"])
+                    )
+                )
+                organizer_view_user_membership = session.execute(membership_stmt).scalar()
+            except Exception:
+                # If there's any error getting membership status, just continue without it
+                pass
+
         # Get recent posts (last 5 posts)
         posts_stmt = (
             select(
@@ -331,6 +353,8 @@ async def get_user_profile(
         
         # Build the response
         profile = {
+            "id": user_data["user_id"],
+            "uuid": account_uuid,
             "first_name": user_data["first_name"],
             "last_name": user_data["last_name"],
             "username": user_data["username"],
@@ -349,6 +373,7 @@ async def get_user_profile(
             "recent_shares": recent_shares,
             "organizations": organizations,
             "recent_events": recent_events,
+            "organizer_view_user_membership": organizer_view_user_membership
         }
         
         return profile
