@@ -16,7 +16,6 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import insert, select, or_, update
 import uuid
 import bcrypt
-import traceback
 from utils.user_utils import create_user
 from utils.organization_utils import create_organization
 from utils.two_factor_auth import TwoFactorAuth
@@ -37,24 +36,7 @@ router = APIRouter(
     tags=["Account Management"],
 )
 
-# Initialize database lazily
-def get_db():
-    return Database()
-
-def get_db_instance():
-    global db
-    if db is None:
-        db = get_db()
-    return db
-
-db = None  # Will be initialized when first accessed
-table = None  # Will be initialized when database is first accessed
-
-def get_table():
-    global table
-    if table is None:
-        table = get_db_instance().tables
-    return table
+db = Database()
 table = db.tables
 session = db.session
 engine = db.engine
@@ -76,57 +58,38 @@ async def create_user_account(
     """
     Initiate user account creation with email OTP verification
     """
-    session = get_db_instance().session
-    table = get_table()
-    
-    try:
-        # Debug logging
-        print(f"Account creation attempt for email: {email}")
-        
-        # Check if email or username already exists
-        check_stmt = select(table["account"]).where(
-            or_(
-                table["account"].c.email == email,
-                table["account"].c.username == username
-            )
+    # Check if email or username already exists
+    check_stmt = select(table["account"]).where(
+        or_(
+            table["account"].c.email == email,
+            table["account"].c.username == username
         )
-        existing_account = session.execute(check_stmt).first()
-        if existing_account:
-            if existing_account.email == email:
-                raise HTTPException(status_code=400, detail="Email already exists")
-            else:
-                raise HTTPException(status_code=400, detail="Username already exists")
+    )
+    existing_account = session.execute(check_stmt).first()
+    if existing_account:
+        if existing_account.email == email:
+            raise HTTPException(status_code=400, detail="Email already exists")
+        else:
+            raise HTTPException(status_code=400, detail="Username already exists")
 
+    try:
         # Generate a UUID for the account
         account_uuid = uuid.uuid4().hex
-        print(f"Generated UUID: {account_uuid}")
 
         # Hash the password securely
         hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-        print("Password hashed successfully")
 
-        # Generate and send OTP - make this optional for debugging
-        try:
-            email_otp_service = get_email_otp_service()
-            full_name = f"{first_name} {last_name}"
-            otp_result = email_otp_service.generate_and_send_otp(email, "user", full_name)
-            
-            if not otp_result:
-                print("Warning: Failed to send verification email, using mock OTP")
-                # Use mock OTP for testing
-                otp_code = "123456"
-                otp_expires = datetime.now(timezone.utc) + timedelta(minutes=15)
-            else:
-                otp_code, otp_expires = otp_result
-                print("OTP generated and sent successfully")
-        except Exception as email_error:
-            print(f"Email service error: {str(email_error)}")
-            # Use mock OTP for testing when email fails
-            otp_code = "123456"
-            otp_expires = datetime.now(timezone.utc) + timedelta(minutes=15)
+        # Generate and send OTP
+        email_otp_service = get_email_otp_service()
+        full_name = f"{first_name} {last_name}"
+        otp_result = email_otp_service.generate_and_send_otp(email, "user", full_name)
+        
+        if not otp_result:
+            raise HTTPException(status_code=500, detail="Failed to send verification email")
+        
+        otp_code, otp_expires = otp_result
 
         # Create account record with OTP (but not verified yet)
-        print("Creating account record in database")
         stmt = insert(table["account"]).values(
             uuid=account_uuid,
             email=email,
@@ -142,10 +105,8 @@ async def create_user_account(
         result = session.execute(stmt)
         session.commit()  # Commit the account first
         account_id = result.inserted_primary_key[0]
-        print(f"Account created with ID: {account_id}")
 
         # Now create the user record in a separate transaction
-        print("Creating user record")
         create_user(
             UserModel(
                 account_id=account_id,
@@ -156,27 +117,20 @@ async def create_user_account(
                 uuid=account_uuid,
             )
         )
-        print("User record created successfully")
         
         return {
             "message": "Account created. Please check your email for a verification code.",
             "email": email,
             "verification_required": True,
-            "next_step": "POST /account/verify-email-otp with your OTP code",
-            "debug_info": {
-                "otp_code": otp_code if os.getenv("ENVIRONMENT") == "development" else "hidden",
-                "account_uuid": account_uuid
-            }
+            "next_step": "POST /account/verify-email-otp with your OTP code"
         }
         
-    except IntegrityError as integrity_error:
+    except IntegrityError:
         session.rollback()
-        print(f"Integrity error: {str(integrity_error)}")
         raise HTTPException(status_code=400, detail="Email or username already exists")
     except Exception as e:
         session.rollback()
-        print(f"General error during account creation: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Account creation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
 
