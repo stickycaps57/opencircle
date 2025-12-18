@@ -4,23 +4,33 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse
 import os
+import traceback
 
 # from .dependencies import get_query_token, get_token_header
 # from .internal import admin
-from routers import (
-    account,
-    resource,
-    user,
-    post,
-    event,
-    rsvp,
-    comment,
-    organization,
-    shares,
-    notification,
-    two_factor_auth,
-    report,
-)
+
+print("Starting to import routers...")
+
+try:
+    from routers import (
+        account,
+        resource,
+        user,
+        post,
+        event,
+        rsvp,
+        comment,
+        organization,
+        shares,
+        notification,
+        two_factor_auth,
+        report,
+    )
+    print("All routers imported successfully")
+except Exception as e:
+    print(f"Error importing routers: {str(e)}")
+    print(f"Traceback: {traceback.format_exc()}")
+    raise
 
 # app = FastAPI(dependencies=[Depends(get_query_token)])
 app = FastAPI()
@@ -52,9 +62,21 @@ origins = [
     "http://127.0.0.1:5173",  # Fallback for local development
 ]
 
+# Add Vercel domains if in production
+if os.getenv("VERCEL_ENV"):
+    origins.extend([
+        "https://*.vercel.app",  # Vercel preview deployments
+        "https://opencircle-app.vercel.app",  # Replace with your actual frontend domain
+    ])
+    # Add the specific VERCEL_URL if available
+    if os.getenv("VERCEL_URL"):
+        origins.append(f"https://{os.getenv('VERCEL_URL')}")
+
+print(f"CORS origins configured: {origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"] if os.getenv("ENVIRONMENT") == "development" else origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
