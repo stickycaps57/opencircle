@@ -5,26 +5,44 @@ import os
 
 
 def get_db_config() -> Dict[str, str]:
-    # Use environment variables for production, fallback to local for development
     return {
-        "username": os.getenv("DB_USERNAME", "root"),
-        "password": os.getenv("DB_PASSWORD", "password"),
-        "host": os.getenv("DB_HOST", "192.168.100.25"),
-        "port": os.getenv("DB_PORT", "3306"),
-        "database": os.getenv("DB_NAME", "opencircle"),
+        "username": os.getenv("DB_USERNAME"),
+        "password": os.getenv("DB_PASSWORD"),
+        "host": os.getenv("DB_HOST"),
+        "port": os.getenv("DB_PORT"),
+        "database": os.getenv("DB_NAME"),
     }
-
 
 def get_connection_string() -> str:
     db_config = get_db_config()
-    return (
+    
+    # Add SSL parameters for cloud databases
+    ssl_disabled = os.getenv("DB_SSL_DISABLED", "false").lower() == "true"
+    
+    base_url = (
         f"mysql+pymysql://{db_config['username']}:{db_config['password']}"
         f"@{db_config['host']}:{db_config['port']}/{db_config['database']}"
     )
+    
+    # Add SSL parameters if SSL is enabled (default for cloud databases)
+    if not ssl_disabled:
+        return f"{base_url}?ssl_disabled=false"
+    else:
+        return f"{base_url}?ssl_disabled=true"
 
 
 # Instantiate the engine ONCE at module level
-engine: Engine = create_engine(get_connection_string())
+ssl_disabled = os.getenv("DB_SSL_DISABLED", "false").lower() == "true"
+
+if ssl_disabled:
+    # For local development without SSL
+    engine: Engine = create_engine(get_connection_string())
+else:
+    # For cloud databases with SSL
+    engine: Engine = create_engine(
+        get_connection_string(),
+        connect_args={"ssl_disabled": False}
+    )
 
 SessionLocal = sessionmaker(bind=engine)
 
