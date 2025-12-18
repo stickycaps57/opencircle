@@ -23,6 +23,7 @@ dependencies = [
     "better-profanity (>=0.7.0,<0.8.0)",
     "pyotp (>=2.9.0,<3.0.0)",
     "qrcode[pil] (>=8.2,<9.0)",
+    "cryptography (>=46.0.3,<47.0.0)",
 ]
 
 
