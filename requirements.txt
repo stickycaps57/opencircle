@@ -107,4 +107,5 @@ urllib3==2.5.0
 uuid==1.30
 uvicorn==0.35.0
 virtualenv==20.32.0
+werkzeug>=1.0.1
 zstandard==0.23.0
