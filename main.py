@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse
+import os
 
 # from .dependencies import get_query_token, get_token_header
 # from .internal import admin
@@ -44,9 +45,11 @@ async def serve_file(file_path: str):
     return response
 
 # Configure CORS
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    frontend_url,
+    "http://localhost:5173",  # Fallback for local development
+    "http://127.0.0.1:5173",  # Fallback for local development
 ]
 
 app.add_middleware(
