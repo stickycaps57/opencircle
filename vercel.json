@@ -17,5 +17,10 @@
   ],
   "env": {
     "PYTHON_VERSION": "3.12"
+  },
+  "build": {
+    "env": {
+      "PIP_REQUIREMENTS": "requirements-prod.txt"
+    }
   }
 }
