@@ -16,7 +16,8 @@
     }
   ],
   "env": {
-    "PYTHON_VERSION": "3.12"
+    "PYTHON_VERSION": "3.12",
+    "USE_DETOXIFY": "false"
   },
   "build": {
     "env": {

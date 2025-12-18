@@ -9,10 +9,8 @@ try:
         from detoxify import Detoxify
         # Initialize detoxify model (use 'original' for faster performance)
         detoxify_model = Detoxify('original')
-    else:
-        print("Detoxify disabled via USE_DETOXIFY environment variable")
-except ImportError:
-    print("Detoxify not available - toxicity detection disabled")
+except (ImportError, Exception):
+    # Silently handle missing detoxify in production
     detoxify_model = None
 
 # Filipino/Tagalog profanity words to add to the existing wordset
