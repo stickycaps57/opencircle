@@ -119,10 +119,6 @@ async def enable_2fa(
         
         account = account_result._mapping
         
-        # Check if 2FA is already enabled
-        if account["two_factor_enabled"]:
-            raise HTTPException(status_code=400, detail="2FA is already enabled for this account")
-        
         # Check if TOTP secret exists
         if not account["totp_secret"]:
             raise HTTPException(status_code=400, detail="2FA setup not initiated. Please call /2fa/setup first.")
@@ -203,15 +199,11 @@ async def disable_2fa(
         if not is_valid:
             raise HTTPException(status_code=400, detail="Invalid TOTP token or backup code")
         
-        # Disable 2FA and clear secrets
+        # Disable 2FA (keep secrets for re-enabling)
         update_stmt = (
             update(table["account"])
             .where(table["account"].c.uuid == account_uuid)
-            .values(
-                two_factor_enabled=False,
-                totp_secret=None,
-                backup_codes=None
-            )
+            .values(two_factor_enabled=False)
         )
         session.execute(update_stmt)
         session.commit()
