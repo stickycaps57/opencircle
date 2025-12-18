@@ -64,10 +64,13 @@ origins = [
 
 # Add Vercel domains if in production
 if os.getenv("VERCEL_ENV"):
-    origins.extend([
-        "https://*.vercel.app",  # Vercel preview deployments
-        "https://opencircle-app.vercel.app/",  # Replace with your actual frontend domain
-    ])
+    origins.extend(
+        [
+            "https://*.vercel.app",  # Vercel preview deployments
+            "https://opencircle-app.vercel.app/",  # Replace with your actual frontend domain
+            "https://opencircle-app.vercel.app",
+        ]
+    )
     # Add the specific VERCEL_URL if available
     if os.getenv("VERCEL_URL"):
         origins.append(f"https://{os.getenv('VERCEL_URL')}")
