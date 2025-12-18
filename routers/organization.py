@@ -466,12 +466,21 @@ async def get_user_joined_organizations(
     session = db.session
 
     # Validate session token if provided (optional for this endpoint)
+    visitor_user_id = None
     if session_token:
         session_account_uuid = get_account_uuid_from_session(session_token)
         if not session_account_uuid:
             raise HTTPException(status_code=401, detail="Invalid session token")
 
     try:
+
+
+        # Get the visitor's user ID
+        visitor_user_stmt = select(table["user"].c.id).join(
+            table["account"], table["user"].c.account_id == table["account"].c.id
+        ).where(table["account"].c.uuid == session_account_uuid)
+        visitor_user_id = session.execute(visitor_user_stmt).scalar()
+
         # Get user_id by joining user and account tables
         user = (
             session.query(table["user"])
@@ -552,6 +561,15 @@ async def get_user_joined_organizations(
             )
             recent_events_count = session.execute(recent_events_count_stmt).scalar()
 
+            # Get visitor membership status
+            visitor_membership_status = None
+            if visitor_user_id:
+                visitor_membership_stmt = select(table["membership"].c.status).where(
+                    (table["membership"].c.organization_id == org.id) &
+                    (table["membership"].c.user_id == visitor_user_id)
+                )
+                visitor_membership_status = session.execute(visitor_membership_stmt).scalar()
+
             organization_data = {
                 "id": org.id,
                 "name": org.name,
@@ -575,6 +593,7 @@ async def get_user_joined_organizations(
                     "member_count": member_count,
                     "recent_events_count": recent_events_count,
                 },
+                "visitor_membership_status": visitor_membership_status,
             }
             organizations.append(organization_data)
 
