@@ -11,8 +11,21 @@
   ],
   "routes": [
     {
+      "src": "/api/(.*)",
+      "dest": "api/index.py"
+    },
+    {
       "src": "/(.*)",
       "dest": "api/index.py"
     }
-  ]
+  ],
+  "env": {
+    "PYTHON_VERSION": "3.12",
+    "USE_DETOXIFY": "false"
+  },
+  "build": {
+    "env": {
+      "PIP_REQUIREMENTS": "requirements-prod.txt"
+    }
+  }
 }

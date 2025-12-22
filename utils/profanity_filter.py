@@ -1,10 +1,17 @@
-from detoxify import Detoxify
 import re
 from better_profanity import profanity
+import os
 
-
-# Initialize detoxify model (use 'original' for faster performance)
-detoxify_model = Detoxify('original')
+# Try to import Detoxify, but make it optional for production
+detoxify_model = None
+try:
+    if os.getenv("USE_DETOXIFY", "true").lower() == "true":
+        from detoxify import Detoxify
+        # Initialize detoxify model (use 'original' for faster performance)
+        detoxify_model = Detoxify('original')
+except (ImportError, Exception):
+    # Silently handle missing detoxify in production
+    detoxify_model = None
 
 # Filipino/Tagalog profanity words to add to the existing wordset
 FILIPINO_PROFANITY_WORDS = [
@@ -37,11 +44,15 @@ except ImportError:
 
 def check_toxicity(text: str, threshold: float = 0.7) -> dict:
     """
-    Check toxicity of the text using Detoxify.
+    Check toxicity of the text using Detoxify if available.
     Returns a dict with is_toxic (bool) and scores (dict).
     """
     if not text or not text.strip():
         return {"is_toxic": False, "scores": {}}
+    
+    # If detoxify is not available, skip toxicity detection
+    if detoxify_model is None:
+        return {"is_toxic": False, "scores": {}, "note": "Detoxify not available"}
     
     # Ensure text is a proper Python string
     text = str(text) if text is not None else ""
