@@ -157,6 +157,7 @@ async def get_all_posts(
                 table["account"].c.uuid.label("author_uuid"),
                 table["account"].c.email.label("author_email"),
                 table["organization"].c.name.label("organization_name"),
+                table["organization"].c.id.label("organization_id"),
                 org_logo_resource.c.directory.label("organization_logo_directory"),
                 org_logo_resource.c.filename.label("organization_logo_filename"),
                 org_logo_resource.c.id.label("organization_logo_id"),
@@ -357,6 +358,7 @@ async def get_all_posts(
                     "author_last_name": data["author_last_name"],
                     "author_bio": data["author_bio"],
                     "author_organization_name": data["organization_name"],
+                    "author_organization_id": data["organization_id"],
                     "author_profile_picture": (
                         {
                             "id": data["author_profile_picture_id"],
