@@ -899,21 +899,25 @@ async def get_all_shares_with_comments(
                     } if sharer_result.organization_logo_directory else None
                 }
                 
-                # If this is an event share and the sharer is a user, get their RSVP status
-                if share_data["content_type"] == 2 and sharer_result.sharer_id:
-                    # Get account_id from sharer_id
-                    sharer_account_stmt = select(table["user"].c.account_id).where(
-                        table["user"].c.id == sharer_result.sharer_id
+                auth_user_rsvp = None
+                # If this is an event share and we have an authenticated user, get their RSVP status
+                if share_data["content_type"] == 2 and account_id:
+                    rsvp_stmt = select(
+                        table["rsvp"].c.id,
+                        table["rsvp"].c.status
+                    ).where(
+                        (table["rsvp"].c.event_id == share_data["content_id"]) &
+                        (table["rsvp"].c.attendee == account_id)
                     )
-                    sharer_account_id = session.execute(sharer_account_stmt).scalar()
+                    rsvp_result = session.execute(rsvp_stmt).fetchone()
                     
-                    if sharer_account_id:
-                        rsvp_status_stmt = select(table["rsvp"].c.status).where(
-                            (table["rsvp"].c.event_id == share_data["content_id"]) &
-                            (table["rsvp"].c.attendee == sharer_account_id)
-                        )
-                        rsvp_status = session.execute(rsvp_status_stmt).scalar()
-                        sharer_data["rsvp_status"] = rsvp_status
+                    auth_user_rsvp = (
+                        {
+                            "rsvp_id": rsvp_result.id,
+                            "status": rsvp_result.status
+                        }
+                        if rsvp_result else None
+                    )
 
                 shares_with_content.append({
                     "share_id": share_data["id"],
@@ -922,7 +926,8 @@ async def get_all_shares_with_comments(
                     "sharer": sharer_data,
                     "content": content_details,
                     "comments": comments,
-                    "comments_count": len(comments)
+                    "comments_count": len(comments),
+                    "auth_user_rsvp": auth_user_rsvp
                 })
 
         return {
