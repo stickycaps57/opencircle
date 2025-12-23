@@ -55,6 +55,7 @@ async def create_user_account(
     username: constr(min_length=3) = Form(...),
     password: constr(min_length=8) = Form(...),
 ):
+    
     """
     Initiate user account creation with email OTP verification
     """
@@ -117,7 +118,7 @@ async def create_user_account(
                 uuid=account_uuid,
             )
         )
-        
+
         return {
             "message": "Account created. Please check your email for a verification code.",
             "email": email,
@@ -302,8 +303,8 @@ async def user_sign_in(
             key="temp_session_token",
             value=temp_session_token,
             httponly=True,
-            secure=False,
-            samesite="Lax",
+            secure=True,
+            samesite="None",
             path="/",
             max_age=300,  # 5 minutes for 2FA verification
         )
@@ -358,11 +359,12 @@ async def user_sign_in(
         key="session_token",
         value=session_token,
         httponly=True,
-        secure=False,  # False for local HTTP development
-        samesite="Lax",  # None for cross-origin cookies
+        secure=True,
+        samesite="None",
         path="/",
         expires=expires_at,
     )
+    
 
     # Return user details (do NOT return session token in body)
     return {
@@ -436,8 +438,8 @@ async def organization_sign_in(
             key="temp_session_token",
             value=temp_session_token,
             httponly=True,
-            secure=False,
-            samesite="Lax",
+            secure=True,
+            samesite="None",
             path="/",
             max_age=300,  # 5 minutes for 2FA verification
         )
@@ -494,8 +496,8 @@ async def organization_sign_in(
         key="session_token",
         value=session_token,
         httponly=True,
-        secure=False,  # False for local HTTP development
-        samesite="Lax",  # None for cross-origin cookies
+        secure=True,
+        samesite="None",
         path="/",
         expires=expires_at,
     )
@@ -760,8 +762,8 @@ async def verify_2fa(
             key="session_token",
             value=session_token,
             httponly=True,
-            secure=False,
-            samesite="Lax",
+            secure=True,
+            samesite="None",
             path="/",
             expires=expires_at,
         )
