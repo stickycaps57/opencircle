@@ -305,7 +305,7 @@ async def user_sign_in(
             value=temp_session_token,
             httponly=True,
             secure=is_production,
-            samesite="Lax",
+            samesite="None",
             path="/",
             max_age=300,  # 5 minutes for 2FA verification
         )
@@ -438,7 +438,7 @@ async def organization_sign_in(
             value=temp_session_token,
             httponly=True,
             secure=is_production,
-            samesite="Lax",
+            samesite="None",
             path="/",
             max_age=300,  # 5 minutes for 2FA verification
         )
