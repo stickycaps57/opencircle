@@ -362,7 +362,7 @@ async def user_sign_in(
         value=session_token,
         httponly=True,
         secure=is_production,  # True for HTTPS in production, False for local HTTP
-        samesite="Lax",
+        samesite="None",
         path="/",
         expires=expires_at,
     )
@@ -497,7 +497,7 @@ async def organization_sign_in(
         value=session_token,
         httponly=True,
         secure=is_production,  # True for HTTPS in production, False for local HTTP
-        samesite="Lax",
+        samesite="None",
         path="/",
         expires=expires_at,
     )
@@ -774,7 +774,7 @@ async def verify_2fa(
             value=session_token,
             httponly=True,
             secure=is_production,  # True for HTTPS in production, False for local HTTP
-            samesite="Lax",
+            samesite="None",
             path="/",
             expires=expires_at,
         )
