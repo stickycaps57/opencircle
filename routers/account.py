@@ -55,16 +55,12 @@ async def create_user_account(
     username: constr(min_length=3) = Form(...),
     password: constr(min_length=8) = Form(...),
 ):
-    
     """
     Initiate user account creation with email OTP verification
     """
     # Check if email or username already exists
     check_stmt = select(table["account"]).where(
-        or_(
-            table["account"].c.email == email,
-            table["account"].c.username == username
-        )
+        or_(table["account"].c.email == email, table["account"].c.username == username)
     )
     existing_account = session.execute(check_stmt).first()
     if existing_account:
@@ -78,16 +74,20 @@ async def create_user_account(
         account_uuid = uuid.uuid4().hex
 
         # Hash the password securely
-        hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        hashed_password = bcrypt.hashpw(
+            password.encode("utf-8"), bcrypt.gensalt()
+        ).decode("utf-8")
 
         # Generate and send OTP
         email_otp_service = get_email_otp_service()
         full_name = f"{first_name} {last_name}"
         otp_result = email_otp_service.generate_and_send_otp(email, "user", full_name)
-        
+
         if not otp_result:
-            raise HTTPException(status_code=500, detail="Failed to send verification email")
-        
+            raise HTTPException(
+                status_code=500, detail="Failed to send verification email"
+            )
+
         otp_code, otp_expires = otp_result
 
         # Create account record with OTP (but not verified yet)
@@ -123,9 +123,9 @@ async def create_user_account(
             "message": "Account created. Please check your email for a verification code.",
             "email": email,
             "verification_required": True,
-            "next_step": "POST /account/verify-email-otp with your OTP code"
+            "next_step": "POST /account/verify-email-otp with your OTP code",
         }
-        
+
     except IntegrityError:
         session.rollback()
         raise HTTPException(status_code=400, detail="Email or username already exists")
@@ -151,10 +151,7 @@ async def create_organization_account(
     """
     # Check if email or username already exists
     check_stmt = select(table["account"]).where(
-        or_(
-            table["account"].c.email == email,
-            table["account"].c.username == username
-        )
+        or_(table["account"].c.email == email, table["account"].c.username == username)
     )
     existing_account = session.execute(check_stmt).first()
     if existing_account:
@@ -168,15 +165,21 @@ async def create_organization_account(
         account_uuid = uuid.uuid4().hex
 
         # Hash the password securely
-        hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        hashed_password = bcrypt.hashpw(
+            password.encode("utf-8"), bcrypt.gensalt()
+        ).decode("utf-8")
 
         # Generate and send OTP
         email_otp_service = get_email_otp_service()
-        otp_result = email_otp_service.generate_and_send_otp(email, "organization", name)
-        
+        otp_result = email_otp_service.generate_and_send_otp(
+            email, "organization", name
+        )
+
         if not otp_result:
-            raise HTTPException(status_code=500, detail="Failed to send verification email")
-        
+            raise HTTPException(
+                status_code=500, detail="Failed to send verification email"
+            )
+
         otp_code, otp_expires = otp_result
 
         # Create account record with OTP (but not verified yet)
@@ -207,14 +210,14 @@ async def create_organization_account(
                 uuid=account_uuid,
             )
         )
-        
+
         return {
             "message": "Organization account created. Please check your email for a verification code.",
             "email": email,
             "verification_required": True,
-            "next_step": "POST /account/verify-email-otp with your OTP code"
+            "next_step": "POST /account/verify-email-otp with your OTP code",
         }
-        
+
     except IntegrityError:
         session.rollback()
         raise HTTPException(status_code=400, detail="Email or username already exists")
@@ -267,10 +270,7 @@ async def user_sign_in(
     session = db.session
     # Find account by email or username
     stmt = select(table["account"]).where(
-        or_(
-            table["account"].c.email == login,
-            table["account"].c.username == login
-        )
+        or_(table["account"].c.email == login, table["account"].c.username == login)
     )
     account_result = session.execute(stmt).first()
     if not account_result:
@@ -286,8 +286,8 @@ async def user_sign_in(
     # Check if email is verified
     if not account.get("email_verified", False):
         raise HTTPException(
-            status_code=403, 
-            detail="Email not verified. Please check your email for verification code or request a new one."
+            status_code=403,
+            detail="Email not verified. Please check your email for verification code or request a new one.",
         )
 
     # Check if 2FA is enabled
@@ -298,21 +298,22 @@ async def user_sign_in(
             request=request,
         )
         temp_session_token = temp_session_details["session_token"]
-        
+        is_production = os.environ.get("ENVIRONMENT") == "production"
+
         response.set_cookie(
             key="temp_session_token",
             value=temp_session_token,
             httponly=True,
-            secure=True,
+            secure=is_production,
             samesite="None",
             path="/",
             max_age=300,  # 5 minutes for 2FA verification
         )
-        
+
         return {
             "requires_2fa": True,
             "message": "2FA verification required. Please provide TOTP token or backup code.",
-            "account_type": "user"
+            "account_type": "user",
         }
 
     # Get user details linked to account, join resource for profile picture
@@ -354,17 +355,17 @@ async def user_sign_in(
     )
     session_token = session_details["session_token"]
     expires_at = session_details["expires_at"]
+    is_production = os.environ.get("ENVIRONMENT") == "production"
 
     response.set_cookie(
         key="session_token",
         value=session_token,
         httponly=True,
-        secure=True,
-        samesite="None",
+        secure=is_production,  # True for HTTPS in production, False for local HTTP
+        samesite="Strict" if is_production else "Lax",
         path="/",
         expires=expires_at,
     )
-    
 
     # Return user details (do NOT return session token in body)
     return {
@@ -402,10 +403,7 @@ async def organization_sign_in(
 ):
     # Find account by email or username
     stmt = select(table["account"]).where(
-        or_(
-            table["account"].c.email == login,
-            table["account"].c.username == login
-        )
+        or_(table["account"].c.email == login, table["account"].c.username == login)
     )
     account_result = session.execute(stmt).first()
     if not account_result:
@@ -421,8 +419,8 @@ async def organization_sign_in(
     # Check if email is verified
     if not account.get("email_verified", False):
         raise HTTPException(
-            status_code=403, 
-            detail="Email not verified. Please check your email for verification code or request a new one."
+            status_code=403,
+            detail="Email not verified. Please check your email for verification code or request a new one.",
         )
 
     # Check if 2FA is enabled
@@ -433,21 +431,22 @@ async def organization_sign_in(
             request=request,
         )
         temp_session_token = temp_session_details["session_token"]
-        
+        is_production = os.environ.get("ENVIRONMENT") == "production"
+
         response.set_cookie(
             key="temp_session_token",
             value=temp_session_token,
             httponly=True,
-            secure=True,
+            secure=is_production,
             samesite="None",
             path="/",
             max_age=300,  # 5 minutes for 2FA verification
         )
-        
+
         return {
             "requires_2fa": True,
             "message": "2FA verification required. Please provide TOTP token or backup code.",
-            "account_type": "organization"
+            "account_type": "organization",
         }
 
     # Get organization details linked to account, join resource for logo
@@ -491,13 +490,14 @@ async def organization_sign_in(
     )
     session_token = session_details["session_token"]
     expires_at = session_details["expires_at"]
+    is_production = os.environ.get("ENVIRONMENT") == "production"
 
     response.set_cookie(
         key="session_token",
         value=session_token,
         httponly=True,
-        secure=True,
-        samesite="None",
+        secure=is_production,  # True for HTTPS in production, False for local HTTP
+        samesite="Strict" if is_production else "Lax",
         path="/",
         expires=expires_at,
     )
@@ -551,18 +551,20 @@ async def logout(response: Response, session_token: str = Cookie(None)):
 async def get_current_user(session_token: str = Cookie(None)):
     if not session_token:
         raise HTTPException(status_code=401, detail="Session token missing")
-    
+
     try:
         # Use utility function to get account_uuid from session
         account_uuid = get_account_uuid_from_session(session_token)
-        
+
         # Get account details
-        account_stmt = select(table["account"]).where(table["account"].c.uuid == account_uuid)
+        account_stmt = select(table["account"]).where(
+            table["account"].c.uuid == account_uuid
+        )
         account_result = session.execute(account_stmt).first()
         if not account_result:
             raise HTTPException(status_code=404, detail="Account not found")
         account = account_result._mapping
-        
+
         # Check if user or organization based on role_id
         if account["role_id"] == 1:  # User
             # Get user details linked to account, join resource for profile picture
@@ -593,9 +595,11 @@ async def get_current_user(session_token: str = Cookie(None)):
             )
             user_result = session.execute(user_stmt).first()
             if not user_result:
-                raise HTTPException(status_code=404, detail="User not found for this account")
+                raise HTTPException(
+                    status_code=404, detail="User not found for this account"
+                )
             user = user_result._mapping
-            
+
             return {
                 "user": {
                     "id": user["id"],
@@ -651,7 +655,7 @@ async def get_current_user(session_token: str = Cookie(None)):
                     status_code=404, detail="Organization not found for this account"
                 )
             organization = org_result._mapping
-            
+
             return {
                 "organization": {
                     "id": organization["id"],
@@ -701,29 +705,33 @@ async def verify_2fa(
 
     if not temp_session_token:
         raise HTTPException(status_code=401, detail="Temporary session token missing")
-    
+
     # Get account_uuid from temporary session
     account_uuid = get_account_uuid_from_session(temp_session_token)
     if not account_uuid:
         raise HTTPException(status_code=401, detail="Invalid temporary session token")
-    
+
     try:
         # Get account details
-        account_stmt = select(table["account"]).where(table["account"].c.uuid == account_uuid)
+        account_stmt = select(table["account"]).where(
+            table["account"].c.uuid == account_uuid
+        )
         account_result = session.execute(account_stmt).first()
         if not account_result:
             raise HTTPException(status_code=404, detail="Account not found")
-        
+
         account = account_result._mapping
-        
+
         # Verify that 2FA is enabled
         if not account["two_factor_enabled"]:
-            raise HTTPException(status_code=400, detail="2FA is not enabled for this account")
-        
+            raise HTTPException(
+                status_code=400, detail="2FA is not enabled for this account"
+            )
+
         # Verify TOTP token or backup code
         is_valid = False
         updated_backup_codes = account["backup_codes"]
-        
+
         if len(totp_token) == 6 and totp_token.isdigit():
             # Verify TOTP token
             is_valid = TwoFactorAuth.verify_totp(account["totp_secret"], totp_token)
@@ -732,7 +740,7 @@ async def verify_2fa(
             is_valid, updated_backup_codes = TwoFactorAuth.verify_backup_code(
                 account["backup_codes"], totp_token
             )
-            
+
             # Update backup codes if one was used
             if is_valid and updated_backup_codes != account["backup_codes"]:
                 update_stmt = (
@@ -742,14 +750,16 @@ async def verify_2fa(
                 )
                 session.execute(update_stmt)
                 session.commit()
-        
+
         if not is_valid:
-            raise HTTPException(status_code=400, detail="Invalid TOTP token or backup code")
-        
+            raise HTTPException(
+                status_code=400, detail="Invalid TOTP token or backup code"
+            )
+
         # Delete temporary session
         delete_session(temp_session_token)
         response.delete_cookie(key="temp_session_token", path="/")
-        
+
         # Create new permanent session
         session_details = add_session(
             account_uuid=account["uuid"],
@@ -757,17 +767,18 @@ async def verify_2fa(
         )
         session_token = session_details["session_token"]
         expires_at = session_details["expires_at"]
-        
+        is_production = os.environ.get("ENVIRONMENT") == "production"
+
         response.set_cookie(
             key="session_token",
             value=session_token,
             httponly=True,
-            secure=True,
-            samesite="None",
+            secure=is_production,  # True for HTTPS in production, False for local HTTP
+            samesite="Strict" if is_production else "Lax",
             path="/",
             expires=expires_at,
         )
-        
+
         # Return appropriate account details based on type
         if account_type == "member":
             # Get user details
@@ -799,9 +810,11 @@ async def verify_2fa(
             )
             user_result = session.execute(user_stmt).first()
             if not user_result:
-                raise HTTPException(status_code=404, detail="User not found for this account")
+                raise HTTPException(
+                    status_code=404, detail="User not found for this account"
+                )
             user = user_result._mapping
-            
+
             return {
                 "user": {
                     "id": user["id"],
@@ -826,7 +839,7 @@ async def verify_2fa(
                 },
                 "expires_at": expires_at.isoformat(),
             }
-            
+
         elif account_type == "organization":
             # Get organization details
             org_stmt = (
@@ -860,7 +873,7 @@ async def verify_2fa(
                     status_code=404, detail="Organization not found for this account"
                 )
             organization = org_result._mapping
-            
+
             return {
                 "organization": {
                     "id": organization["id"],
@@ -886,7 +899,7 @@ async def verify_2fa(
             }
         else:
             raise HTTPException(status_code=400, detail="Invalid account type")
-            
+
     except SQLAlchemyError as e:
         session.rollback()
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
@@ -909,33 +922,31 @@ async def verify_email_otp(
         # Find account by email
         account_stmt = select(table["account"]).where(table["account"].c.email == email)
         account_result = session.execute(account_stmt).first()
-        
+
         if not account_result:
             raise HTTPException(status_code=404, detail="Account not found")
-        
+
         account = account_result._mapping
-        
+
         # Check if account is already verified
         if account["email_verified"]:
             raise HTTPException(status_code=400, detail="Account is already verified")
-        
+
         # Check OTP attempts
         if account["otp_attempts"] >= 5:
             raise HTTPException(
-                status_code=429, 
-                detail="Too many verification attempts. Please request a new OTP code."
+                status_code=429,
+                detail="Too many verification attempts. Please request a new OTP code.",
             )
-        
+
         # Get email OTP service
         email_otp_service = get_email_otp_service()
-        
+
         # Verify OTP
         is_valid = email_otp_service.verify_otp(
-            otp_code,
-            account["email_otp_code"],
-            account["email_otp_expires"]
+            otp_code, account["email_otp_code"], account["email_otp_expires"]
         )
-        
+
         if not is_valid:
             # Increment failed attempts
             update_attempts_stmt = (
@@ -945,19 +956,19 @@ async def verify_email_otp(
             )
             session.execute(update_attempts_stmt)
             session.commit()
-            
+
             remaining_attempts = 5 - (account["otp_attempts"] + 1)
             if remaining_attempts <= 0:
                 raise HTTPException(
                     status_code=429,
-                    detail="Too many verification attempts. Please request a new OTP code."
+                    detail="Too many verification attempts. Please request a new OTP code.",
                 )
             else:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid or expired OTP code. {remaining_attempts} attempts remaining."
+                    detail=f"Invalid or expired OTP code. {remaining_attempts} attempts remaining.",
                 )
-        
+
         # OTP is valid - activate the account
         update_stmt = (
             update(table["account"])
@@ -966,22 +977,22 @@ async def verify_email_otp(
                 email_verified=True,
                 email_otp_code=None,
                 email_otp_expires=None,
-                otp_attempts=0
+                otp_attempts=0,
             )
         )
         session.execute(update_stmt)
         session.commit()
-        
+
         # Determine account type for response
         account_type = "user" if account["role_id"] == 1 else "organization"
-        
+
         return {
             "message": f"Email verified successfully! Your {account_type} account is now active.",
             "email_verified": True,
             "account_type": account_type,
-            "next_step": f"You can now login using POST /account/{account_type}_signin"
+            "next_step": f"You can now login using POST /account/{account_type}_signin",
         }
-        
+
     except HTTPException as e:
         # Re-raise HTTP exceptions to preserve status code and detail
         raise e
@@ -1003,20 +1014,22 @@ async def resend_email_otp(
         # Find account by email
         account_stmt = select(table["account"]).where(table["account"].c.email == email)
         account_result = session.execute(account_stmt).first()
-        
+
         if not account_result:
             raise HTTPException(status_code=404, detail="Account not found")
-        
+
         account = account_result._mapping
-        
+
         # Check if account is already verified
         if account["email_verified"]:
             raise HTTPException(status_code=400, detail="Account is already verified")
-        
+
         # Get account details for email
         if account["role_id"] == 1:  # User
             # Get user name
-            user_stmt = select(table["user"]).where(table["user"].c.account_id == account["id"])
+            user_stmt = select(table["user"]).where(
+                table["user"].c.account_id == account["id"]
+            )
             user_result = session.execute(user_stmt).first()
             if not user_result:
                 raise HTTPException(status_code=404, detail="User details not found")
@@ -1025,23 +1038,29 @@ async def resend_email_otp(
             account_type = "user"
         else:  # Organization
             # Get organization name
-            org_stmt = select(table["organization"]).where(table["organization"].c.account_id == account["id"])
+            org_stmt = select(table["organization"]).where(
+                table["organization"].c.account_id == account["id"]
+            )
             org_result = session.execute(org_stmt).first()
             if not org_result:
-                raise HTTPException(status_code=404, detail="Organization details not found")
+                raise HTTPException(
+                    status_code=404, detail="Organization details not found"
+                )
             org = org_result._mapping
             name = org["name"]
             account_type = "organization"
-        
+
         # Generate new OTP
         email_otp_service = get_email_otp_service()
         otp_result = email_otp_service.generate_and_send_otp(email, account_type, name)
-        
+
         if not otp_result:
-            raise HTTPException(status_code=500, detail="Failed to send verification email")
-        
+            raise HTTPException(
+                status_code=500, detail="Failed to send verification email"
+            )
+
         otp_code, otp_expires = otp_result
-        
+
         # Update account with new OTP
         update_stmt = (
             update(table["account"])
@@ -1049,18 +1068,18 @@ async def resend_email_otp(
             .values(
                 email_otp_code=otp_code,
                 email_otp_expires=otp_expires,
-                otp_attempts=0  # Reset attempts with new OTP
+                otp_attempts=0,  # Reset attempts with new OTP
             )
         )
         session.execute(update_stmt)
         session.commit()
-        
+
         return {
             "message": "New verification code sent to your email",
             "email": email,
-            "next_step": "POST /account/verify-email-otp with your new OTP code"
+            "next_step": "POST /account/verify-email-otp with your new OTP code",
         }
-        
+
     except HTTPException as e:
         # Re-raise HTTP exceptions to preserve status code and detail
         raise e
