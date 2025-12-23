@@ -305,7 +305,7 @@ async def user_sign_in(
             value=temp_session_token,
             httponly=True,
             secure=is_production,
-            samesite="Strict" if is_production else "Lax",
+            samesite="Lax",
             path="/",
             max_age=300,  # 5 minutes for 2FA verification
         )
@@ -362,7 +362,7 @@ async def user_sign_in(
         value=session_token,
         httponly=True,
         secure=is_production,  # True for HTTPS in production, False for local HTTP
-        samesite="Strict" if is_production else "Lax",
+        samesite="Lax",
         path="/",
         expires=expires_at,
     )
@@ -438,7 +438,7 @@ async def organization_sign_in(
             value=temp_session_token,
             httponly=True,
             secure=is_production,
-            samesite="Strict" if is_production else "Lax",
+            samesite="Lax",
             path="/",
             max_age=300,  # 5 minutes for 2FA verification
         )
@@ -497,7 +497,7 @@ async def organization_sign_in(
         value=session_token,
         httponly=True,
         secure=is_production,  # True for HTTPS in production, False for local HTTP
-        samesite="Strict" if is_production else "Lax",
+        samesite="Lax",
         path="/",
         expires=expires_at,
     )
@@ -774,7 +774,7 @@ async def verify_2fa(
             value=session_token,
             httponly=True,
             secure=is_production,  # True for HTTPS in production, False for local HTTP
-            samesite="Strict" if is_production else "Lax",
+            samesite="Lax",
             path="/",
             expires=expires_at,
         )
