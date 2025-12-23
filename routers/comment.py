@@ -4,6 +4,7 @@ from sqlalchemy import insert, update, delete, func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
+from utils.resource_utils import format_resource_for_response
 from utils.profanity_filter import moderate_text
 
 router = APIRouter(
@@ -305,14 +306,10 @@ async def get_comments_for_event(event_id: int, limit: int = 10, offset: int = 0
                     "user_first_name": getattr(c, "user_first_name", None),
                     "user_last_name": getattr(c, "user_last_name", None),
                     "user_bio": getattr(c, "user_bio", None),
-                    "profile_picture": (
-                        {
-                            "id": getattr(c, "profile_picture_id", None),
-                            "directory": getattr(c, "profile_picture_directory", None),
-                            "filename": getattr(c, "profile_picture_filename", None),
-                        }
-                        if getattr(c, "profile_picture_id", None)
-                        else None
+                    "profile_picture": format_resource_for_response(
+                        getattr(c, "profile_picture_id", None),
+                        getattr(c, "profile_picture_directory", None),
+                        getattr(c, "profile_picture_filename", None)
                     ),
                 }
             result.append(
@@ -412,14 +409,10 @@ async def get_comments_for_post(post_id: int, limit: int = 10, offset: int = 0):
                     "user_first_name": getattr(c, "user_first_name", None),
                     "user_last_name": getattr(c, "user_last_name", None),
                     "user_bio": getattr(c, "user_bio", None),
-                    "profile_picture": (
-                        {
-                            "id": getattr(c, "profile_picture_id", None),
-                            "directory": getattr(c, "profile_picture_directory", None),
-                            "filename": getattr(c, "profile_picture_filename", None),
-                        }
-                        if getattr(c, "profile_picture_id", None)
-                        else None
+                    "profile_picture": format_resource_for_response(
+                        getattr(c, "profile_picture_id", None),
+                        getattr(c, "profile_picture_directory", None),
+                        getattr(c, "profile_picture_filename", None)
                     ),
                 }
             result.append(
