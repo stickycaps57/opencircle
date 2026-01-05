@@ -4,7 +4,6 @@ from sqlalchemy import insert, update, delete
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import Request
 from utils.session_utils import get_account_uuid_from_session
-from utils.resource_utils import format_resource_for_response
 from utils.notification_service import NotificationService
 
 
@@ -142,10 +141,14 @@ async def get_rsvps_for_event(
                     "last_name": data["last_name"],
                     "email": data["email"],
                     "bio": data["bio"],
-                    "profile_picture": format_resource_for_response(
-                        data["profile_picture_id"],
-                        data["profile_picture_directory"],
-                        data["profile_picture_filename"]
+                    "profile_picture": (
+                        {
+                            "id": data["profile_picture_id"],
+                            "directory": data["profile_picture_directory"],
+                            "filename": data["profile_picture_filename"],
+                        }
+                        if data["profile_picture_id"]
+                        else None
                     ),
                 }
             )
@@ -205,10 +208,14 @@ async def get_attendees_for_event(
                     "first_name": data["first_name"],
                     "last_name": data["last_name"],
                     "email": data["email"],
-                    "profile_picture": format_resource_for_response(
-                        data["profile_picture_id"],
-                        data["profile_picture_directory"],
-                        data["profile_picture_filename"]
+                    "profile_picture": (
+                        {
+                            "id": data["profile_picture_id"],
+                            "directory": data["profile_picture_directory"],
+                            "filename": data["profile_picture_filename"],
+                        }
+                        if data["profile_picture_id"]
+                        else None
                     ),
                 }
             )

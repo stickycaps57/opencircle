@@ -4,7 +4,6 @@ from sqlalchemy import insert, update, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
-from utils.resource_utils import format_resource_for_response
 from sqlalchemy import or_
 from sqlalchemy.sql import func
 from utils.notification_service import NotificationService
@@ -414,18 +413,26 @@ async def get_user_memberships(account_uuid: str):
                         "last_name": m.last_name,
                         "bio": m.bio,
                         "status": m.status,
-                        "profile_picture": format_resource_for_response(
-                            m.profile_picture_id,
-                            m.profile_picture_directory,
-                            m.profile_picture_filename
+                        "profile_picture": (
+                            {
+                                "id": m.profile_picture_id,
+                                "directory": m.profile_picture_directory,
+                                "filename": m.profile_picture_filename,
+                            }
+                            if m.profile_picture_id
+                            else None
                         ),
                     }
                 )
             # Fetch logo details for the organization
-            organization_logo = format_resource_for_response(
-                org.logo_id,
-                org.logo_directory,
-                org.logo_filename
+            organization_logo = (
+                {
+                    "id": org.logo_id,
+                    "directory": org.logo_directory,
+                    "filename": org.logo_filename,
+                }
+                if org.logo_id
+                else None
             )
             organizations.append(
                 {
@@ -568,10 +575,14 @@ async def get_user_joined_organizations(
                 "name": org.name,
                 "description": org.description,
                 "category": org.category,
-                "logo": format_resource_for_response(
-                    org.logo_id,
-                    org.logo_directory,
-                    org.logo_filename
+                "logo": (
+                    {
+                        "id": org.logo_id,
+                        "directory": org.logo_directory,
+                        "filename": org.logo_filename,
+                    }
+                    if org.logo_id
+                    else None
                 ),
                 "organization_created_date": org.organization_created_date,
                 "membership_date": org.membership_date,
@@ -666,10 +677,14 @@ async def get_pending_membership_organization(account_uuid: str):
                     "organization_id": org.id,
                     "organization_name": org.name,
                     "organization_category": org.category,
-                    "organization_logo": format_resource_for_response(
-                        org.logo_id,
-                        org.logo_directory,
-                        org.logo_filename
+                    "organization_logo": (
+                        {
+                            "id": org.logo_id,
+                            "directory": org.logo_directory,
+                            "filename": org.logo_filename,
+                        }
+                        if org.logo_id
+                        else None
                     ),
                     "membership_status": pending_membership.status,
                 }
@@ -914,20 +929,28 @@ async def get_organization_members(organization_id: int):
                     "last_name": m.last_name,
                     "bio": m.bio,
                     "status": m.status,
-                    "profile_picture": format_resource_for_response(
-                        m.profile_picture_id,
-                        m.profile_picture_directory,
-                        m.profile_picture_filename
+                    "profile_picture": (
+                        {
+                            "id": m.profile_picture_id,
+                            "directory": m.profile_picture_directory,
+                            "filename": m.profile_picture_filename,
+                        }
+                        if m.profile_picture_id
+                        else None
                     ),
                 }
             )
         return {
             "organization_id": org.id,
             "organization_name": org.name,
-            "organization_logo": format_resource_for_response(
-                org.logo_id,
-                org.logo_directory,
-                org.logo_filename
+            "organization_logo": (
+                {
+                    "id": org.logo_id,
+                    "directory": org.logo_directory,
+                    "filename": org.logo_filename,
+                }
+                if org.logo_id
+                else None
             ),
             "member_count": len(members),
             "members": members,
@@ -1048,10 +1071,14 @@ async def search_organizations(query: str):
                     "name": org.name,
                     "description": org.description,
                     "category": org.category,
-                    "logo": format_resource_for_response(
-                        org.logo_id,
-                        org.logo_directory,
-                        org.logo_filename
+                    "logo": (
+                        {
+                            "id": org.logo_id,
+                            "directory": org.logo_directory,
+                            "filename": org.logo_filename,
+                        }
+                        if org.logo_id
+                        else None
                     ),
                 }
             )
@@ -1155,10 +1182,14 @@ async def get_organization_by_id(
             "account_id": organization["account_id"],
             "name": organization["name"],
             "email": organization["email"],
-            "logo": format_resource_for_response(
-                organization["logo"],
-                organization["logo_directory"],
-                organization["logo_filename"]
+            "logo": (
+                {
+                    "id": organization["logo"],
+                    "directory": organization["logo_directory"],
+                    "filename": organization["logo_filename"],
+                }
+                if organization["logo"]
+                else None
             ),
             "category": organization["category"],
             "description": organization["description"],
@@ -1452,10 +1483,14 @@ async def get_organization_profile(
             "username": org_data["username"],
             "description": org_data["description"],
             "category": org_data["category"],
-            "logo": format_resource_for_response(
-                org_data["logo_id"],
-                org_data["logo_directory"],
-                org_data["logo_filename"]
+            "logo": (
+                {
+                    "id": org_data["logo_id"],
+                    "directory": org_data["logo_directory"],
+                    "filename": org_data["logo_filename"],
+                }
+                if org_data["logo_id"]
+                else None
             ),
             "created_date": org_data["created_date"],
             "recent_posts": recent_posts,

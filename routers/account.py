@@ -29,7 +29,6 @@ from utils.session_utils import (
     delete_session,
     get_account_uuid_from_session,
 )
-from utils.resource_utils import format_resource_for_response
 
 
 router = APIRouter(
@@ -378,10 +377,14 @@ async def user_sign_in(
             "bio": user["bio"],
             "email": account["email"],
             "username": account["username"],
-            "profile_picture": format_resource_for_response(
-                user["profile_picture"], 
-                user["profile_picture_directory"], 
-                user["profile_picture_filename"]
+            "profile_picture": (
+                {
+                    "id": user["profile_picture"],
+                    "directory": user["profile_picture_directory"],
+                    "filename": user["profile_picture_filename"],
+                }
+                if user["profile_picture"]
+                else None
             ),
             "uuid": account["uuid"],
             "role_id": account["role_id"],  # Include role_id from account table
@@ -507,10 +510,14 @@ async def organization_sign_in(
             "name": organization["name"],
             "email": account["email"],
             "username": account["username"],
-            "logo": format_resource_for_response(
-                organization["logo"], 
-                organization["logo_directory"], 
-                organization["logo_filename"]
+            "logo": (
+                {
+                    "id": organization["logo"],
+                    "directory": organization["logo_directory"],
+                    "filename": organization["logo_filename"],
+                }
+                if organization["logo"]
+                else None
             ),
             "category": organization["category"],
             "description": organization["description"],
@@ -601,10 +608,14 @@ async def get_current_user(session_token: str = Cookie(None)):
                     "last_name": user["last_name"],
                     "bio": user["bio"],
                     "email": account["email"],
-                    "profile_picture": format_resource_for_response(
-                        user["profile_picture"], 
-                        user["profile_picture_directory"], 
-                        user["profile_picture_filename"]
+                    "profile_picture": (
+                        {
+                            "id": user["profile_picture"],
+                            "directory": user["profile_picture_directory"],
+                            "filename": user["profile_picture_filename"],
+                        }
+                        if user["profile_picture"]
+                        else None
                     ),
                     "uuid": account["uuid"],
                     "role_id": account["role_id"],
@@ -651,10 +662,14 @@ async def get_current_user(session_token: str = Cookie(None)):
                     "account_id": organization["account_id"],
                     "name": organization["name"],
                     "email": account["email"],
-                    "logo": format_resource_for_response(
-                        organization["logo"], 
-                        organization["logo_directory"], 
-                        organization["logo_filename"]
+                    "logo": (
+                        {
+                            "id": organization["logo"],
+                            "directory": organization["logo_directory"],
+                            "filename": organization["logo_filename"],
+                        }
+                        if organization["logo"]
+                        else None
                     ),
                     "category": organization["category"],
                     "description": organization["description"],
@@ -809,10 +824,14 @@ async def verify_2fa(
                     "bio": user["bio"],
                     "email": account["email"],
                     "username": account["username"],
-                    "profile_picture": format_resource_for_response(
-                        user["profile_picture"], 
-                        user["profile_picture_directory"], 
-                        user["profile_picture_filename"]
+                    "profile_picture": (
+                        {
+                            "id": user["profile_picture"],
+                            "directory": user["profile_picture_directory"],
+                            "filename": user["profile_picture_filename"],
+                        }
+                        if user["profile_picture"]
+                        else None
                     ),
                     "uuid": account["uuid"],
                     "role_id": account["role_id"],
@@ -861,10 +880,14 @@ async def verify_2fa(
                     "account_id": organization["account_id"],
                     "name": organization["name"],
                     "email": account["email"],
-                    "logo": format_resource_for_response(
-                        organization["logo"], 
-                        organization["logo_directory"], 
-                        organization["logo_filename"]
+                    "logo": (
+                        {
+                            "id": organization["logo"],
+                            "directory": organization["logo_directory"],
+                            "filename": organization["logo_filename"],
+                        }
+                        if organization["logo"]
+                        else None
                     ),
                     "category": organization["category"],
                     "description": organization["description"],
