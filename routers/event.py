@@ -14,7 +14,7 @@ from lib.database import Database
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import insert, select, func
 from typing import Optional
-from utils.resource_utils import add_resource, delete_resource, get_resource, format_resource_for_response
+from utils.resource_utils import add_resource, delete_resource, get_resource
 from lib.models import EventModel
 from sqlalchemy import update, delete
 from utils.address_utils import add_address, update_address
@@ -305,10 +305,14 @@ async def get_events(
         events = []
         for row in events_result:
             event = dict(row._mapping)
-            event["image"] = format_resource_for_response(
-                event["image"],
-                event["image_directory"],
-                event["image_filename"]
+            event["image"] = (
+                {
+                    "id": event["image"],
+                    "directory": event["image_directory"],
+                    "filename": event["image_filename"],
+                }
+                if event["image"]
+                else None
             )
             event.pop("image_directory", None)
             event.pop("image_filename", None)
@@ -554,11 +558,14 @@ async def get_event_rsvps(
         for row in rsvps_result:
             rsvp = dict(row._mapping)
             # Group profile_picture details if present
-            rsvp["profile_picture"] = format_resource_for_response(
-                rsvp["profile_picture"],
-                rsvp["profile_picture_directory"],
-                rsvp["profile_picture_filename"]
-            )
+            if rsvp["profile_picture"]:
+                rsvp["profile_picture"] = {
+                    "id": rsvp["profile_picture"],
+                    "directory": rsvp["profile_picture_directory"],
+                    "filename": rsvp["profile_picture_filename"],
+                }
+            else:
+                rsvp["profile_picture"] = None
             rsvp.pop("profile_picture_directory", None)
             rsvp.pop("profile_picture_filename", None)
             rsvps.append(rsvp)
@@ -687,10 +694,14 @@ async def get_active_events_by_organizer(
             event_data = dict(row._mapping)
             event_id = event_data["id"]
 
-            event_data["image"] = format_resource_for_response(
-                event_data["image"],
-                event_data["image_directory"],
-                event_data["image_filename"]
+            event_data["image"] = (
+                {
+                    "id": event_data["image"],
+                    "directory": event_data["image_directory"],
+                    "filename": event_data["image_filename"],
+                }
+                if event_data["image"]
+                else None
             )
             event_data.pop("image_directory", None)
             event_data.pop("image_filename", None)

@@ -4,7 +4,7 @@ from lib.database import Database
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import insert, select, func
 from typing import Optional
-from utils.resource_utils import add_resource, delete_resource, get_resource, format_resource_for_response
+from utils.resource_utils import add_resource, delete_resource, get_resource
 from utils.session_utils import get_account_uuid_from_session
 import json
 from fastapi import Depends
@@ -175,11 +175,11 @@ async def get_user_profile(
                             ).where(table["resource"].c.id == resource_id)
                             resource_result = session.execute(resource_stmt).first()
                             if resource_result:
-                                images.append(format_resource_for_response(
-                                    resource_result.id,
-                                    resource_result.directory,
-                                    resource_result.filename,
-                                ))
+                                images.append({
+                                    "id": resource_result.id,
+                                    "directory": resource_result.directory,
+                                    "filename": resource_result.filename,
+                                })
                 except (json.JSONDecodeError, TypeError):
                     pass
             
@@ -261,10 +261,14 @@ async def get_user_profile(
                 "name": membership_dict["name"],
                 "category": membership_dict["category"],
                 "description": membership_dict["description"],
-                "logo": format_resource_for_response(
-                    membership_dict["logo_id"], 
-                    membership_dict["logo_directory"], 
-                    membership_dict["logo_filename"]
+                "logo": (
+                    {
+                        "id": membership_dict["logo_id"],
+                        "directory": membership_dict["logo_directory"],
+                        "filename": membership_dict["logo_filename"],
+                    }
+                    if membership_dict["logo_id"]
+                    else None
                 ),
                 "membership_date": membership_dict["membership_date"],
             })
@@ -324,11 +328,11 @@ async def get_user_profile(
                 ).where(table["resource"].c.id == event_dict["image"])
                 event_resource_result = session.execute(event_resource_stmt).first()
                 if event_resource_result:
-                    event_image = format_resource_for_response(
-                        event_resource_result.id,
-                        event_resource_result.directory,
-                        event_resource_result.filename,
-                    )
+                    event_image = {
+                        "id": event_resource_result.id,
+                        "directory": event_resource_result.directory,
+                        "filename": event_resource_result.filename,
+                    }
             
             recent_events.append({
                 "id": event_dict["id"],
@@ -355,10 +359,14 @@ async def get_user_profile(
             "last_name": user_data["last_name"],
             "username": user_data["username"],
             "bio": user_data["bio"],
-            "profile_picture": format_resource_for_response(
-                user_data["profile_picture_id"], 
-                user_data["profile_picture_directory"], 
-                user_data["profile_picture_filename"]
+            "profile_picture": (
+                {
+                    "id": user_data["profile_picture_id"],
+                    "directory": user_data["profile_picture_directory"],
+                    "filename": user_data["profile_picture_filename"],
+                }
+                if user_data["profile_picture_id"]
+                else None
             ),
             "created_date": user_data["created_date"],
             "recent_posts": recent_posts,
@@ -376,4 +384,3 @@ async def get_user_profile(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
-

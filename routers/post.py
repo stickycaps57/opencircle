@@ -13,7 +13,7 @@ from lib.database import Database
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import insert, select, func
 from typing import Optional
-from utils.resource_utils import add_resource, delete_resource, get_resource, format_resource_for_response
+from utils.resource_utils import add_resource, delete_resource, get_resource
 from lib.models import PostModel
 from sqlalchemy import update, delete
 from fastapi import Cookie
@@ -211,11 +211,13 @@ async def get_all_posts(
                         res_result = session.execute(res_stmt).first()
                         if res_result:
                             res_data = res_result._mapping
-                            images.append(format_resource_for_response(
-                                res_data["id"],
-                                res_data["directory"],
-                                res_data["filename"]
-                            ))
+                            images.append(
+                                {
+                                    "id": res_data["id"],
+                                    "directory": res_data["directory"],
+                                    "filename": res_data["filename"],
+                                }
+                            )
                 except (json.JSONDecodeError, TypeError):
                     pass
 
@@ -304,10 +306,16 @@ async def get_all_posts(
                             "organization": {
                                 "name": cdata["organization_name"],
                                 "description": cdata["organization_description"],
-                                "logo": format_resource_for_response(
-                                    cdata["organization_logo_id"],
-                                    cdata["organization_logo_directory"],
-                                    cdata["organization_logo_filename"]
+                                "logo": (
+                                    {
+                                        "id": cdata["organization_logo_id"],
+                                        "directory": cdata[
+                                            "organization_logo_directory"
+                                        ],
+                                        "filename": cdata["organization_logo_filename"],
+                                    }
+                                    if cdata["organization_logo_id"]
+                                    else None
                                 ),
                             },
                         }
@@ -327,10 +335,14 @@ async def get_all_posts(
                                 "first_name": cdata["first_name"],
                                 "last_name": cdata["last_name"],
                                 "bio": cdata["bio"],
-                                "profile_picture": format_resource_for_response(
-                                    cdata["profile_picture_id"],
-                                    cdata["profile_picture_directory"],
-                                    cdata["profile_picture_filename"]
+                                "profile_picture": (
+                                    {
+                                        "id": cdata["profile_picture_id"],
+                                        "directory": cdata["profile_picture_directory"],
+                                        "filename": cdata["profile_picture_filename"],
+                                    }
+                                    if cdata["profile_picture_id"]
+                                    else None
                                 ),
                             },
                         }
@@ -347,15 +359,23 @@ async def get_all_posts(
                     "author_bio": data["author_bio"],
                     "author_organization_name": data["organization_name"],
                     "author_organization_id": data["organization_id"],
-                    "author_profile_picture": format_resource_for_response(
-                        data["author_profile_picture_id"],
-                        data["author_profile_picture_directory"],
-                        data["author_profile_picture_filename"]
+                    "author_profile_picture": (
+                        {
+                            "id": data["author_profile_picture_id"],
+                            "directory": data["author_profile_picture_directory"],
+                            "filename": data["author_profile_picture_filename"],
+                        }
+                        if data["author_profile_picture_id"]
+                        else None
                     ),
-                    "author_logo": format_resource_for_response(
-                        data["organization_logo_id"],
-                        data["organization_logo_directory"],
-                        data["organization_logo_filename"]
+                    "author_logo": (
+                        {
+                           "id": data["organization_logo_id"],
+                            "directory": data["organization_logo_directory"],
+                            "filename": data["organization_logo_filename"],
+                        }
+                        if data["organization_logo_id"]
+                        else None
                     ),
                     "images": images,
                     "description": data["description"],
@@ -454,10 +474,14 @@ async def get_posts(
                     "first_name": user["first_name"],
                     "last_name": user["last_name"],
                     "bio": user["bio"],
-                    "profile_picture": format_resource_for_response(
-                        user["profile_picture"],
-                        user["profile_picture_directory"],
-                        user["profile_picture_filename"]
+                    "profile_picture": (
+                        {
+                            "id": user["profile_picture"],
+                            "directory": user["profile_picture_directory"],
+                            "filename": user["profile_picture_filename"],
+                        }
+                        if user["profile_picture"]
+                        else None
                     ),
                 }
         elif is_org:
@@ -488,10 +512,14 @@ async def get_posts(
                     "name": org["name"],
                     "category": org["category"],
                     "description": org["description"],
-                    "logo": format_resource_for_response(
-                        org["logo"],
-                        org["logo_directory"],
-                        org["logo_filename"]
+                    "logo": (
+                        {
+                            "id": org["logo"],
+                            "directory": org["logo_directory"],
+                            "filename": org["logo_filename"],
+                        }
+                        if org["logo"]
+                        else None
                     ),
                 }
 
@@ -513,11 +541,13 @@ async def get_posts(
                         res_result = session.execute(res_stmt).first()
                         if res_result:
                             res_data = res_result._mapping
-                            images.append(format_resource_for_response(
-                                res_data["id"],
-                                res_data["directory"],
-                                res_data["filename"]
-                            ))
+                            images.append(
+                                {
+                                    "id": res_data["id"],
+                                    "directory": res_data["directory"],
+                                    "filename": res_data["filename"],
+                                }
+                            )
                 except (json.JSONDecodeError, TypeError):
                     pass
 
@@ -646,12 +676,13 @@ async def get_posts_with_comments(
                         res_result = session.execute(res_stmt).first()
                         if res_result:
                             res_data = res_result._mapping
-                            images.append(format_resource_for_response(
-                                res_data["id"],
-                                res_data["directory"],
-                                res_data["filename"]
-                            ))
-
+                            images.append(
+                                {
+                                    "id": res_data["id"],
+                                    "directory": res_data["directory"],
+                                    "filename": res_data["filename"],
+                                }
+                            )
                 except (json.JSONDecodeError, TypeError):
                     pass
 
@@ -739,10 +770,16 @@ async def get_posts_with_comments(
                             "organization": {
                                 "name": data["organization_name"],
                                 "description": data["organization_description"],
-                                "logo": format_resource_for_response(
-                                    data["organization_logo_id"],
-                                    data["organization_logo_directory"],
-                                    data["organization_logo_filename"]
+                                "logo": (
+                                    {
+                                        "id": data["organization_logo_id"],
+                                        "directory": data[
+                                            "organization_logo_directory"
+                                        ],
+                                        "filename": data["organization_logo_filename"],
+                                    }
+                                    if data["organization_logo_id"]
+                                    else None
                                 ),
                             },
                         }
@@ -762,10 +799,14 @@ async def get_posts_with_comments(
                                 "first_name": data["first_name"],
                                 "last_name": data["last_name"],
                                 "bio": data["bio"],
-                                "profile_picture": format_resource_for_response(
-                                    data["profile_picture_id"],
-                                    data["profile_picture_directory"],
-                                    data["profile_picture_filename"]
+                                "profile_picture": (
+                                    {
+                                        "id": data["profile_picture_id"],
+                                        "directory": data["profile_picture_directory"],
+                                        "filename": data["profile_picture_filename"],
+                                    }
+                                    if data["profile_picture_id"]
+                                    else None
                                 ),
                             },
                         }
@@ -785,15 +826,23 @@ async def get_posts_with_comments(
                 "last_name": post_dict["author_last_name"],
                 "bio": post_dict["author_bio"],
                 "organization_name": post_dict["organization_name"],
-                "profile_picture": format_resource_for_response(
-                    post_dict["author_profile_picture_id"],
-                    post_dict["author_profile_picture_directory"],
-                    post_dict["author_profile_picture_filename"]
+                "profile_picture": (
+                    {
+                        "id": post_dict["author_profile_picture_id"],
+                        "directory": post_dict["author_profile_picture_directory"],
+                        "filename": post_dict["author_profile_picture_filename"],
+                    }
+                    if post_dict["author_profile_picture_id"]
+                    else None
                 ),
-                "logo": format_resource_for_response(
-                    post_dict["organization_logo_id"],
-                    post_dict["organization_logo_directory"],
-                    post_dict["organization_logo_filename"]
+                "logo": (
+                    {
+                        "id": post_dict["organization_logo_id"],
+                        "directory": post_dict["organization_logo_directory"],
+                        "filename": post_dict["organization_logo_filename"],
+                    }
+                    if post_dict["organization_logo_id"]
+                    else None
                 ),
             }
             # Remove raw resource and author fields from top-level
@@ -1057,11 +1106,13 @@ async def get_single_post(
                     res_result = session.execute(res_stmt).first()
                     if res_result:
                         res_data = res_result._mapping
-                        images.append(format_resource_for_response(
-                            res_data["id"],
-                            res_data["directory"],
-                            res_data["filename"]
-                        ))
+                        images.append(
+                            {
+                                "id": res_data["id"],
+                                "directory": res_data["directory"],
+                                "filename": res_data["filename"],
+                            }
+                        )
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -1077,10 +1128,14 @@ async def get_single_post(
                 "first_name": data["author_first_name"],
                 "last_name": data["author_last_name"],
                 "bio": data["author_bio"],
-                "profile_picture": format_resource_for_response(
-                    data["author_profile_picture_id"],
-                    data["author_profile_picture_directory"],
-                    data["author_profile_picture_filename"]
+                "profile_picture": (
+                    {
+                        "id": data["author_profile_picture_id"],
+                        "directory": data["author_profile_picture_directory"],
+                        "filename": data["author_profile_picture_filename"],
+                    }
+                    if data["author_profile_picture_id"]
+                    else None
                 ),
             },
             "images": images,

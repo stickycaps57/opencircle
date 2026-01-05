@@ -4,7 +4,6 @@ from lib.database import Database
 from sqlalchemy import insert, delete, select, func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from utils.session_utils import get_account_uuid_from_session
-from utils.resource_utils import format_resource_for_response
 from typing import Optional
 import json
 
@@ -227,16 +226,14 @@ async def get_user_shares(
                     "first_name": sharer_result.first_name,
                     "last_name": sharer_result.last_name,
                     "organization_name": sharer_result.organization_name,
-                    "profile_picture": format_resource_for_response(
-                        sharer_result.profile_picture,
-                        sharer_result.profile_picture_directory,
-                        sharer_result.profile_picture_filename
-                    ),
-                    "logo": format_resource_for_response(
-                        None,  # organization_logo_id not selected in this query
-                        sharer_result.organization_logo_directory,
-                        sharer_result.organization_logo_filename
-                    )
+                    "profile_picture": {
+                        "directory": sharer_result.profile_picture_directory,
+                        "filename": sharer_result.profile_picture_filename
+                    } if sharer_result.profile_picture_directory else None,
+                    "logo": {
+                        "directory": sharer_result.organization_logo_directory,
+                        "filename": sharer_result.organization_logo_filename
+                    } if sharer_result.organization_logo_directory else None
                 }
                 
                 # Add RSVP status for events if the sharer is a user and content is an event
@@ -323,11 +320,11 @@ async def get_user_shares(
                                 if res_result:
                                     res_data = res_result._mapping
                                     images.append(
-                                        format_resource_for_response(
-                                            res_data["id"],
-                                            res_data["directory"],
-                                            res_data["filename"]
-                                        )
+                                        {
+                                            "id": res_data["id"],
+                                            "directory": res_data["directory"],
+                                            "filename": res_data["filename"],
+                                        }
                                     )
                         except (json.JSONDecodeError, TypeError):
                             pass
@@ -344,15 +341,23 @@ async def get_user_shares(
                         "author_last_name": post_result.author_last_name,
                         "author_organization_name": post_result.author_organization_name,
                         "images": images,
-                        "profile_picture": format_resource_for_response(
-                            post_result.profile_picture_id,
-                            post_result.profile_picture_directory,
-                            post_result.profile_picture_filename
+                        "profile_picture": (
+                            {
+                                "id": post_result.profile_picture_id,
+                                "directory": post_result.profile_picture_directory,
+                                "filename": post_result.profile_picture_filename,
+                            }
+                            if post_result.profile_picture_id
+                            else None
                         ),
-                        "logo": format_resource_for_response(
-                            post_result.organization_logo_id,
-                            post_result.organization_logo_directory,
-                            post_result.organization_logo_filename
+                        "logo": (
+                            {
+                                "id": post_result.organization_logo_id,
+                                "directory": post_result.organization_logo_directory,
+                                "filename": post_result.organization_logo_filename,
+                            }
+                            if post_result.organization_logo_id
+                            else None
                         ),
                     }
 
@@ -400,10 +405,14 @@ async def get_user_shares(
                         "created_date": event_result.created_date,
                         "organization_name": event_result.organization_name,
                         "organization_id": event_result.organization_id,
-                        "image": format_resource_for_response(
-                            event_result.image,
-                            event_result.image_directory,
-                            event_result.image_filename
+                        "image": (
+                            {
+                                "id": event_result.image,
+                                "directory": event_result.image_directory,
+                                "filename": event_result.image_filename,
+                            }
+                            if event_result.image
+                            else None
                         ),
                         "address": {
                             "province": event_result.address_province,
@@ -534,16 +543,14 @@ async def get_shares_for_content(
                     "first_name": share.first_name,
                     "last_name": share.last_name,
                     "organization_name": share.organization_name,
-                    "profile_picture": format_resource_for_response(
-                        None,  # profile_picture_id not selected in this query
-                        share.profile_picture_directory,
-                        share.profile_picture_filename
-                    ),
-                    "logo": format_resource_for_response(
-                        None,  # organization_logo_id not selected in this query
-                        share.organization_logo_directory,
-                        share.organization_logo_filename
-                    )
+                    "profile_picture": {
+                        "directory": share.profile_picture_directory,
+                        "filename": share.profile_picture_filename
+                    } if share.profile_picture_directory else None,
+                    "logo": {
+                        "directory": share.organization_logo_directory,
+                        "filename": share.organization_logo_filename
+                    } if share.organization_logo_directory else None
                 }
             }
             
@@ -705,11 +712,11 @@ async def get_all_shares_with_comments(
                                 image_query = select(table["resource"]).where(table["resource"].c.id == resource_id)
                                 image_result = session.execute(image_query).first()
                                 if image_result:
-                                    images.append(format_resource_for_response(
-                                        image_result.id,
-                                        image_result.directory,
-                                        image_result.filename
-                                    ))
+                                    images.append({
+                                        "id": image_result.id,
+                                        "directory": image_result.directory,
+                                        "filename": image_result.filename
+                                    })
                         except (json.JSONDecodeError, TypeError):
                             pass
                     
@@ -726,16 +733,14 @@ async def get_all_shares_with_comments(
                             "last_name": post_result.author_last_name,
                             "organization_id": post_result.author_organization_id,
                             "organization_name": post_result.author_organization_name,
-                            "profile_picture": format_resource_for_response(
-                                post_result.author_profile_picture,
-                                post_result.author_profile_directory,
-                                post_result.author_profile_filename
-                            ),
-                            "organization_logo": format_resource_for_response(
-                                None,  # organization_logo_id not selected in this query
-                                post_result.author_organization_logo_directory,
-                                post_result.author_organization_logo_filename
-                            ),
+                            "profile_picture": {
+                                "directory": post_result.author_profile_directory,
+                                "filename": post_result.author_profile_filename
+                            } if post_result.author_profile_directory else None,
+                            "organization_logo": {
+                                "directory": post_result.author_organization_logo_directory,
+                                "filename": post_result.author_organization_logo_filename
+                            } if post_result.author_organization_logo_directory else None,
                         }
                     }
                     
@@ -809,18 +814,24 @@ async def get_all_shares_with_comments(
                         "description": event_result.description,
                         "event_date": event_result.event_date,
                         "created_date": event_result.created_date,
-                        "image": format_resource_for_response(
-                            event_result.image,
-                            event_result.event_image_directory,
-                            event_result.event_image_filename
+                        "image": (
+                            {
+                                "directory": event_result.event_image_directory,
+                                "filename": event_result.event_image_filename,
+                            }
+                            if event_result.event_image_directory
+                            else None
                         ),
                         "organization": {
                             "name": event_result.organization_name,
                             "category": event_result.organization_category,
-                            "logo": format_resource_for_response(
-                                None,  # organization_logo_id not selected in this query
-                                event_result.organization_logo_directory,
-                                event_result.organization_logo_filename
+                            "logo": (
+                                {
+                                    "directory": event_result.organization_logo_directory,
+                                    "filename": event_result.organization_logo_filename,
+                                }
+                                if event_result.organization_logo_directory
+                                else None
                             ),
                             "address": {
                                 "province": event_result.province,
@@ -878,16 +889,14 @@ async def get_all_shares_with_comments(
                     "first_name": sharer_result.first_name,
                     "last_name": sharer_result.last_name,
                     "organization_name": sharer_result.organization_name,
-                    "profile_picture": format_resource_for_response(
-                        sharer_result.profile_picture,
-                        sharer_result.profile_picture_directory,
-                        sharer_result.profile_picture_filename
-                    ),
-                    "logo": format_resource_for_response(
-                        None,  # organization_logo_id not selected in this query
-                        sharer_result.organization_logo_directory,
-                        sharer_result.organization_logo_filename
-                    )
+                    "profile_picture": {
+                        "directory": sharer_result.profile_picture_directory,
+                        "filename": sharer_result.profile_picture_filename
+                    } if sharer_result.profile_picture_directory else None,
+                    "logo": {
+                        "directory": sharer_result.organization_logo_directory,
+                        "filename": sharer_result.organization_logo_filename
+                    } if sharer_result.organization_logo_directory else None
                 }
                 
                 auth_user_rsvp = None
