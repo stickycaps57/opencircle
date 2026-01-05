@@ -1,8 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Path, Query
 from utils.resource_utils import add_resource, delete_resource, get_resource
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from fastapi.responses import FileResponse, RedirectResponse
-from utils.ftp_utils import ftp_manager
+from fastapi.responses import FileResponse
 
 router = APIRouter(
     prefix="/resource",
@@ -62,8 +61,11 @@ async def get_photo(
 ):
     try:
         resource = get_resource(resource_id)
-        # Redirect to the public FTP URL instead of serving the file directly
-        return RedirectResponse(url=resource["public_url"])
+        return FileResponse(
+            path=resource["file_path"],
+            filename=resource["filename"],
+            media_type="application/octet-stream",
+        )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Resource not found")
     except Exception as e:
