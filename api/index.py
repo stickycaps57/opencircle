@@ -16,7 +16,7 @@ try:
         return {
             "status": "healthy",
             "message": "API is running",
-            "environment": os.getenv("VERCEL_ENV", "unknown")
+            "environment": os.getenv("ENVIRONMENT", "production")
         }
         
 except ImportError as e:
@@ -40,7 +40,7 @@ except ImportError as e:
         return {
             "error": f"Import error: {str(e)}", 
             "message": "Please check your dependencies",
-            "environment": os.getenv("VERCEL_ENV", "unknown")
+            "environment": os.getenv("ENVIRONMENT", "production")
         }
     
     @app.get("/api/health")
@@ -48,7 +48,7 @@ except ImportError as e:
         return {
             "status": "error",
             "error": f"Import error: {str(e)}",
-            "environment": os.getenv("VERCEL_ENV", "unknown")
+            "environment": os.getenv("ENVIRONMENT", "production")
         }
 
-# Vercel expects the app to be available directly
+# Export the app for the hosting platform
