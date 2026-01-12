@@ -56,24 +56,16 @@ async def serve_file(file_path: str):
     return response
 
 # Configure CORS
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+frontend_url = os.getenv("FRONTEND_URL", "https://production.dl08rlkafgsj3.amplifyapp.com")
 origins = [
     frontend_url,
     "http://localhost:5173",  # Fallback for local development
     "http://127.0.0.1:5173",  # Fallback for local development
 ]
 
-# Add Vercel domains if in production
-if os.getenv("VERCEL_ENV"):
-    origins.extend(
-        [
-            "https://*.vercel.app",  # Vercel preview deployments
-            "https://opencircle-app.vercel.app/",  # Replace with your actual frontend domain
-        ]
-    )
-    # Add the specific VERCEL_URL if available
-    if os.getenv("VERCEL_URL"):
-        origins.append(f"https://{os.getenv('VERCEL_URL')}")
+# Add production URL explicitly
+if frontend_url != "https://production.dl08rlkafgsj3.amplifyapp.com":
+    origins.append("https://production.dl08rlkafgsj3.amplifyapp.com")
 
 print(f"CORS origins configured: {origins}")
 
