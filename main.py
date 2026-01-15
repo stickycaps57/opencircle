@@ -59,13 +59,17 @@ async def serve_file(file_path: str):
 frontend_url = os.getenv("FRONTEND_URL", "http://opencircle-fe.s3-website-ap-southeast-1.amazonaws.com")
 origins = [
     frontend_url,
+    "http://opencircle-fe.s3-website-ap-southeast-1.amazonaws.com",
+    "https://opencircle-fe.s3-website-ap-southeast-1.amazonaws.com",
     "http://localhost:5173",  # Fallback for local development
     "http://127.0.0.1:5173",  # Fallback for local development
 ]
 
 # Add production URL explicitly
-if frontend_url != "http://opencircle-fe.s3-website-ap-southeast-1.amazonaws.com":
+if (frontend_url != "http://opencircle-fe.s3-website-ap-southeast-1.amazonaws.com" 
+    and frontend_url != "https://opencircle-fe.s3-website-ap-southeast-1.amazonaws.com"):
     origins.append("http://opencircle-fe.s3-website-ap-southeast-1.amazonaws.com")
+    origins.append("https://opencircle-fe.s3-website-ap-southeast-1.amazonaws.com")
 
 print(f"CORS origins configured: {origins}")
 
