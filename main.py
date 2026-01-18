@@ -3,8 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse
-import os
+
 import traceback
+
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 
 # from .dependencies import get_query_token, get_token_header
@@ -75,7 +80,7 @@ print(f"CORS origins configured: {origins}")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if os.getenv("ENVIRONMENT") == "development" else origins,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
