@@ -3,13 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse
-
+import os
 import traceback
 
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
 
 
 # from .dependencies import get_query_token, get_token_header
