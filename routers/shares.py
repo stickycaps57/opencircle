@@ -362,6 +362,7 @@ async def get_user_shares(
                     }
 
             elif share_data["content_type"] == 2:  # Event
+                org_logo_resource = table["resource"].alias("org_logo_resource")
                 event_query = (
                     select(
                         table["event"].c.id,
@@ -377,6 +378,10 @@ async def get_user_shares(
                         table["address"].c.city.label("address_city"),
                         table["address"].c.barangay.label("address_barangay"),
                         table["organization"].c.name.label("organization_name"),
+                        table["organization"].c.category.label("organization_category"),
+                        org_logo_resource.c.directory.label("organization_logo_directory"),
+                        org_logo_resource.c.filename.label("organization_logo_filename"),
+                        org_logo_resource.c.id.label("organization_logo_id"),
                     )
                     .select_from(
                         table["event"]
@@ -389,6 +394,10 @@ async def get_user_shares(
                         .join(
                             table["organization"],
                             table["event"].c.organization_id == table["organization"].c.id,
+                        )
+                        .outerjoin(
+                            org_logo_resource,
+                            table["organization"].c.logo == org_logo_resource.c.id,
                         )
                     )
                     .where(table["event"].c.id == share_data["content_id"])
@@ -414,6 +423,18 @@ async def get_user_shares(
                             if event_result.image
                             else None
                         ),
+                        "organization": {
+                            "name": event_result.organization_name,
+                            "category": event_result.organization_category,
+                            "logo": (
+                                {
+                                    "directory": event_result.organization_logo_directory,
+                                    "filename": event_result.organization_logo_filename,
+                                }
+                                if event_result.organization_logo_directory
+                                else None
+                            ),
+                        },
                         "address": {
                             "province": event_result.address_province,
                             "city": event_result.address_city,
