@@ -305,7 +305,8 @@ async def user_sign_in(
             value=temp_session_token,
             httponly=True,
             secure=is_production,
-            samesite="None",  
+            samesite="Lax",
+            # samesite="None",
             path="/",
             max_age=300,  # 5 minutes for 2FA verification
         )
@@ -362,7 +363,8 @@ async def user_sign_in(
         value=session_token,
         httponly=True,
         secure=is_production,  # True for HTTPS in production, False for local HTTP
-        samesite="None",  
+        samesite="Lax",
+        # samesite="None",
         path="/",
         expires=expires_at,
     )
@@ -401,6 +403,7 @@ async def organization_sign_in(
     request: Request = None,
     response: Response = None,
 ):
+    session = db.session
     # Find account by email or username
     stmt = select(table["account"]).where(
         or_(table["account"].c.email == login, table["account"].c.username == login)
@@ -425,6 +428,7 @@ async def organization_sign_in(
 
     # Check if 2FA is enabled
     if account["two_factor_enabled"]:
+
         # Store account_uuid in a temporary session for 2FA verification
         temp_session_details = add_session(
             account_uuid=account["uuid"],
@@ -438,7 +442,8 @@ async def organization_sign_in(
             value=temp_session_token,
             httponly=True,
             secure=is_production,
-            samesite="None",  
+            samesite="Lax",
+            # samesite="None",
             path="/",
             max_age=300,  # 5 minutes for 2FA verification
         )
@@ -497,7 +502,8 @@ async def organization_sign_in(
         value=session_token,
         httponly=True,
         secure=is_production,  # True for HTTPS in production, False for local HTTP
-        samesite="None",  
+        samesite="Lax",
+        # samesite="None",
         path="/",
         expires=expires_at,
     )
@@ -774,7 +780,8 @@ async def verify_2fa(
             value=session_token,
             httponly=True,
             secure=is_production,  # True for HTTPS in production, False for local HTTP
-            samesite="None",  
+            samesite="Lax",
+            # samesite="None",  
             path="/",
             expires=expires_at,
         )
