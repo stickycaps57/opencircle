@@ -195,6 +195,8 @@ async def delete_event(
     session_token: str = Cookie(None, alias="session_token"),
 ):
     session = db.session
+    notification_service = NotificationService()
+    
     try:
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
@@ -216,22 +218,45 @@ async def delete_event(
         if organization_id is None:
             raise HTTPException(status_code=404, detail="Organization not found")
 
-        # Check if event exists and is owned by this organization
-        select_event = select(table["event"].c.id).where(
+        # Check if event exists and get event details before deletion
+        select_event = select(
+            table["event"].c.id,
+            table["event"].c.title,
+            table["organization"].c.name
+        ).select_from(
+            table["event"].join(
+                table["organization"],
+                table["event"].c.organization_id == table["organization"].c.id,
+            )
+        ).where(
             (table["event"].c.id == event_id)
             & (table["event"].c.organization_id == organization_id)
         )
-        event_exists = session.execute(select_event).scalar()
-        if not event_exists:
+        event_details = session.execute(select_event).first()
+        if not event_details:
             raise HTTPException(
                 status_code=403,
                 detail="You do not have permission to delete this event or event not found",
             )
 
+        event_title = event_details[1]
+        organization_name = event_details[2]
+
         # Delete the event
         stmt = delete(table["event"]).where(table["event"].c.id == event_id)
         session.execute(stmt)
         session.commit()
+
+        # Notify all organization members about the event deletion
+        try:
+            notification_service.notify_organization_members_event_deleted(
+                organization_id=organization_id,
+                event_title=event_title,
+                organization_name=organization_name
+            )
+        except Exception as e:
+            print(f"Error sending event deletion notification: {e}")
+
         return {"message": "Event deleted successfully"}
     except SQLAlchemyError as e:
         session.rollback()
@@ -239,6 +264,9 @@ async def delete_event(
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+        notification_service.close()
 
 
 @router.get("/", tags=["Get all Events and Show RSVP Status of User Per Event"])
