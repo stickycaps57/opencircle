@@ -261,6 +261,55 @@ class NotificationService:
             print(f"Unexpected error notifying members about event deletion: {e}")
             return False
 
+    def notify_organization_members_event_updated(
+        self, organization_id: int, event_id: int, event_title: str, organization_name: str
+    ) -> bool:
+        """Notify all organization members when an event is updated."""
+        try:
+            # Get all approved members of the organization
+            members_query = (
+                self.session.query(
+                    self.table["user"].c.account_id
+                )
+                .join(
+                    self.table["membership"],
+                    self.table["user"].c.id == self.table["membership"].c.user_id
+                )
+                .filter(
+                    self.table["membership"].c.organization_id == organization_id,
+                    self.table["membership"].c.status == "approved"
+                )
+                .all()
+            )
+
+            if not members_query:
+                return True  # No members to notify, but not an error
+
+            title = f"Event Updated: {event_title}"
+            message = f"The event '{event_title}' organized by {organization_name} has been updated. Check for new details."
+
+            # Create notifications for all members
+            success_count = 0
+            for member in members_query:
+                if self.create_notification(
+                    recipient_id=member.account_id,
+                    notification_type=NotificationType.EVENT_UPDATE,
+                    title=title,
+                    message=message,
+                    related_entity_id=event_id,
+                    related_entity_type=RelatedEntityType.EVENT,
+                ):
+                    success_count += 1
+
+            return success_count > 0
+
+        except SQLAlchemyError as e:
+            print(f"Error notifying members about event update: {e}")
+            return False
+        except Exception as e:
+            print(f"Unexpected error notifying members about event update: {e}")
+            return False
+
     def notify_organization_new_membership_request(
         self, organization_account_id: int, user_name: str, user_account_id: int
     ) -> bool:

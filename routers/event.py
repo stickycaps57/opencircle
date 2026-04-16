@@ -405,6 +405,8 @@ async def update_event(
     session_token: str = Cookie(None, alias="session_token"),
 ):
     session = db.session
+    notification_service = NotificationService()
+    
     try:
         if not session_token:
             raise HTTPException(status_code=401, detail="Authentication required")
@@ -444,6 +446,11 @@ async def update_event(
                 status_code=403,
                 detail="You do not have permission to update this event",
             )
+
+        # Extract event title and organization name for notification
+        event_mapping = event._mapping
+        event_title = title if title is not None else event_mapping["title"]
+        organization_name = event_mapping["name"]
 
         update_data = {}
 
@@ -510,14 +517,20 @@ async def update_event(
                 city_code=city_code,
                 barangay_code=barangay_code,
             )
+            # Mark that address fields were updated
+            if "address_updated" not in update_data:
+                update_data["address_updated"] = True
 
         # Update image if provided
         if image:
             image_id = add_resource(image, organization_id)
             update_data["image"] = image_id
 
-        if not update_data:
+        if not update_data or (update_data.get("address_updated") and len(update_data) == 1):
             raise HTTPException(status_code=400, detail="No fields to update")
+
+        # Remove the temporary marker before database update
+        update_data.pop("address_updated", None)
 
         stmt = (
             update(table["event"])
@@ -526,6 +539,18 @@ async def update_event(
         )
         session.execute(stmt)
         session.commit()
+
+        # Notify all organization members about the event update
+        try:
+            notification_service.notify_organization_members_event_updated(
+                organization_id=organization_id,
+                event_id=event_id,
+                event_title=event_title,
+                organization_name=organization_name
+            )
+        except Exception as e:
+            print(f"Error sending event update notification: {e}")
+
         return {"message": "Event updated successfully"}
     except IntegrityError as e:
         session.rollback()
@@ -536,6 +561,9 @@ async def update_event(
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+        notification_service.close()
 
 
 @router.get("/{event_id}/rsvps", tags=["Get RSVPs for Event"])
