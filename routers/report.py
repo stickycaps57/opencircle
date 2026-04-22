@@ -3,6 +3,7 @@ from lib.database import Database
 from sqlalchemy import select, func, and_
 from sqlalchemy.exc import SQLAlchemyError
 from utils.session_utils import get_account_uuid_from_session
+from utils.datetime_utils import format_datetime
 from datetime import datetime
 from typing import Optional
 
@@ -121,8 +122,8 @@ async def get_event_respondents_analytics(
             events_analytics.append({
                 "event_id": event_dict["event_id"],
                 "event_title": event_dict["title"],
-                "event_date": event_dict["event_date"],
-                "event_created_date": event_dict["event_created_date"],
+                "event_date": format_datetime(event_dict["event_date"]),
+                "event_created_date": format_datetime(event_dict["event_created_date"]),
                 "rsvp_statistics": stats,
                 "unique_attendees": total_attendees,
                 "response_rate": round((stats["total"] / max(total_attendees, 1)) * 100, 2) if total_attendees > 0 else 0
@@ -373,8 +374,8 @@ async def get_event_respondents_details(
             respondents.append({
                 "rsvp_id": rsvp_dict["rsvp_id"],
                 "status": rsvp_dict["status"],
-                "rsvp_created_date": rsvp_dict["rsvp_created_date"],
-                "rsvp_modified_date": rsvp_dict["rsvp_modified_date"],
+                "rsvp_created_date": format_datetime(rsvp_dict["rsvp_created_date"]),
+                "rsvp_modified_date": format_datetime(rsvp_dict["rsvp_modified_date"]),
                 "attendee": {
                     "account_id": rsvp_dict["account_id"],
                     "account_uuid": rsvp_dict["account_uuid"],
@@ -394,7 +395,7 @@ async def get_event_respondents_details(
             "event": {
                 "id": event_data["id"],
                 "title": event_data["title"],
-                "event_date": event_data["event_date"],
+                "event_date": format_datetime(event_data["event_date"]),
                 "organization_id": event_data["org_id"],
                 "organization_name": event_data["org_name"]
             },
@@ -653,8 +654,8 @@ async def get_membership_details(
             members.append({
                 "membership_id": membership_dict["membership_id"],
                 "status": membership_dict["status"],
-                "membership_created_date": membership_dict["membership_created_date"],
-                "membership_modified_date": membership_dict["membership_modified_date"],
+                "membership_created_date": format_datetime(membership_dict["membership_created_date"]),
+                "membership_modified_date": format_datetime(membership_dict["membership_modified_date"]),
                 "member": {
                     "user_id": membership_dict["user_id"],
                     "account_id": membership_dict["account_id"],
@@ -789,10 +790,10 @@ async def get_post_comment_analytics(
             post_analytics.append({
                 "post_id": row_dict["post_id"],
                 "post_description": row_dict["post_description"][:100] + "..." if len(row_dict["post_description"]) > 100 else row_dict["post_description"],
-                "post_created_date": row_dict["post_created_date"],
+                "post_created_date": format_datetime(row_dict["post_created_date"]),
                 "comment_count": row_dict["comment_count"],
-                "first_comment_date": row_dict["first_comment_date"],
-                "last_comment_date": row_dict["last_comment_date"]
+                "first_comment_date": format_datetime(row_dict["first_comment_date"]),
+                "last_comment_date": format_datetime(row_dict["last_comment_date"])
             })
 
         return {
@@ -909,11 +910,11 @@ async def get_event_comment_analytics(
             event_analytics.append({
                 "event_id": row_dict["event_id"],
                 "event_title": row_dict["event_title"],
-                "event_date": row_dict["event_date"],
-                "event_created_date": row_dict["event_created_date"],
+                "event_date": format_datetime(row_dict["event_date"]),
+                "event_created_date": format_datetime(row_dict["event_created_date"]),
                 "comment_count": row_dict["comment_count"],
-                "first_comment_date": row_dict["first_comment_date"],
-                "last_comment_date": row_dict["last_comment_date"]
+                "first_comment_date": format_datetime(row_dict["first_comment_date"]),
+                "last_comment_date": format_datetime(row_dict["last_comment_date"])
             })
 
         return {
