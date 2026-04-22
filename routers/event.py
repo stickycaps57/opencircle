@@ -22,6 +22,7 @@ from utils.resource_utils import add_resource
 from utils.session_utils import get_account_uuid_from_session
 from utils.profanity_filter import moderate_text
 from utils.notification_service import NotificationService
+from utils.datetime_utils import format_datetime
 
 
 router = APIRouter(
@@ -47,19 +48,6 @@ def address_dict(row):
         "city_code": row.get("address_city_code"),
         "barangay_code": row.get("address_barangay_code"),
     }
-
-
-def format_datetime(dt):
-    """Convert datetime object to ISO format string with UTC timezone."""
-    if dt is None:
-        return None
-    if hasattr(dt, 'isoformat'):
-        iso_str = dt.isoformat()
-        # If the datetime doesn't have timezone info, append Z for UTC
-        if '+' not in iso_str and 'Z' not in iso_str:
-            iso_str += 'Z'
-        return iso_str
-    return dt
 
 
 @router.post("/", tags=["Create Event"])

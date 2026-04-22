@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
 from utils.profanity_filter import moderate_text
+from utils.datetime_utils import format_datetime
 
 router = APIRouter(
     prefix="/comment",
@@ -320,8 +321,8 @@ async def get_comments_for_event(event_id: int, limit: int = 10, offset: int = 0
                     "id": c.id,
                     "author": c.author,
                     "message": c.message,
-                    "created_date": c.created_date,
-                    "last_modified_date": c.last_modified_date,
+                    "created_date": format_datetime(c.created_date),
+                    "last_modified_date": format_datetime(c.last_modified_date),
                     "account_uuid": getattr(c, "account_uuid", None),
                     "account_email": getattr(c, "account_email", None),
                     "role": role_name,
@@ -427,8 +428,8 @@ async def get_comments_for_post(post_id: int, limit: int = 10, offset: int = 0):
                     "id": c.id,
                     "author": c.author,
                     "message": c.message,
-                    "created_date": c.created_date,
-                    "last_modified_date": c.last_modified_date,
+                    "created_date": format_datetime(c.created_date),
+                    "last_modified_date": format_datetime(c.last_modified_date),
                     "account_uuid": getattr(c, "account_uuid", None),
                     "account_email": getattr(c, "account_email", None),
                     "role": role_name,
