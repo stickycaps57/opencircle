@@ -49,6 +49,19 @@ def address_dict(row):
     }
 
 
+def format_datetime(dt):
+    """Convert datetime object to ISO format string with UTC timezone."""
+    if dt is None:
+        return None
+    if hasattr(dt, 'isoformat'):
+        iso_str = dt.isoformat()
+        # If the datetime doesn't have timezone info, append Z for UTC
+        if '+' not in iso_str and 'Z' not in iso_str:
+            iso_str += 'Z'
+        return iso_str
+    return dt
+
+
 @router.post("/", tags=["Create Event"])
 async def create_event(
     title: str = Form(...),
@@ -333,6 +346,11 @@ async def get_events(
         events = []
         for row in events_result:
             event = dict(row._mapping)
+            # Format datetime fields
+            event["event_date"] = format_datetime(event["event_date"])
+            event["created_date"] = format_datetime(event["created_date"])
+            event["last_modified_date"] = format_datetime(event["last_modified_date"])
+            
             event["image"] = (
                 {
                     "id": event["image"],
@@ -749,6 +767,10 @@ async def get_active_events_by_organizer(
         for row in events_result:
             event_data = dict(row._mapping)
             event_id = event_data["id"]
+            # Format datetime fields
+            event_data["event_date"] = format_datetime(event_data.get("event_date"))
+            event_data["created_date"] = format_datetime(event_data.get("created_date"))
+            event_data["last_modified_date"] = format_datetime(event_data.get("last_modified_date"))
 
             event_data["image"] = (
                 {
@@ -1054,7 +1076,7 @@ async def get_active_events_by_organizer(
                 comment_obj = {
                     "comment_id": data["comment_id"],
                     "message": data["message"],
-                    "created_date": data["created_date"],
+                    "created_date": format_datetime(data["created_date"]),
                     "account": {
                         "id": data["account_id"],
                         "uuid": data["account_uuid"],
@@ -1229,6 +1251,11 @@ async def get_past_events_by_organizer(
         for row in events_result:
             event_id = row._mapping["id"]
             event_data = dict(row._mapping)
+            # Format datetime fields
+            event_data["event_date"] = format_datetime(event_data.get("event_date"))
+            event_data["created_date"] = format_datetime(event_data.get("created_date"))
+            event_data["last_modified_date"] = format_datetime(event_data.get("last_modified_date"))
+
             event_data["image"] = (
                 {
                     "id": event_data["image"],
@@ -1532,7 +1559,7 @@ async def get_past_events_by_organizer(
                 comment_obj = {
                     "comment_id": data["comment_id"],
                     "message": data["message"],
-                    "created_date": data["created_date"],
+                    "created_date": format_datetime(data["created_date"]),
                     "account": {
                         "id": data["account_id"],
                         "uuid": data["account_uuid"],
@@ -2284,6 +2311,10 @@ async def get_all_events_with_comments(
         for row in events_result:
             event_data = dict(row._mapping)
             org_id = event_data.get("org_id")
+            # Format datetime fields
+            event_data["event_date"] = format_datetime(event_data.get("event_date"))
+            event_data["created_date"] = format_datetime(event_data.get("created_date"))
+            event_data["last_modified_date"] = format_datetime(event_data.get("last_modified_date"))
             # Group organization details, including logo resource info
             event_data["organization"] = {
                 "id": event_data.pop("org_id"),
@@ -2452,7 +2483,7 @@ async def get_all_events_with_comments(
                 comment_obj = {
                     "comment_id": data["comment_id"],
                     "message": data["message"],
-                    "created_date": data["created_date"],
+                    "created_date": format_datetime(data["created_date"]),
                     "account": {
                         "id": data["account_id"],
                         "uuid": data["uuid"],
@@ -2604,6 +2635,11 @@ async def get_user_rsvped_events_by_month_year(
         events = []
         for row in events_result:
             event_data = dict(row._mapping)
+            # Format datetime fields
+            event_data["event_date"] = format_datetime(event_data.get("event_date"))
+            event_data["created_date"] = format_datetime(event_data.get("created_date"))
+            event_data["last_modified_date"] = format_datetime(event_data.get("last_modified_date"))
+
             event_data["address"] = {
                 "id": event_data["address_id"],
                 "country": event_data["address_country"],
@@ -2755,7 +2791,7 @@ async def get_user_rsvped_events_by_month_year(
                 comment_obj = {
                     "comment_id": data["comment_id"],
                     "message": data["message"],
-                    "created_date": data["created_date"],
+                    "created_date": format_datetime(data["created_date"]),
                     "account": {
                         "id": data["account_id"],
                         "uuid": data["uuid"],
@@ -3024,7 +3060,7 @@ async def get_user_events_with_comments(
                 comment_obj = {
                     "comment_id": data["comment_id"],
                     "message": data["message"],
-                    "created_date": data["created_date"],
+                    "created_date": format_datetime(data["created_date"]),
                     "account": {
                         "id": data["account_id"],
                         "uuid": data["uuid"],
@@ -3347,7 +3383,7 @@ async def get_user_events_by_rsvp_status_with_comments(
                 comment_obj = {
                     "comment_id": data["comment_id"],
                     "message": data["message"],
-                    "created_date": data["created_date"],
+                    "created_date": format_datetime(data["created_date"]),
                     "account": {
                         "id": data["account_id"],
                         "uuid": data["uuid"],
@@ -3751,7 +3787,7 @@ async def get_event_by_id_with_comments(
             comment_obj = {
                 "comment_id": data["comment_id"],
                 "message": data["message"],
-                "created_date": data["created_date"],
+                "created_date": format_datetime(data["created_date"]),
                 "account": {
                     "id": data["account_id"],
                     "uuid": data["uuid"],
@@ -4043,7 +4079,7 @@ async def get_user_past_events_with_comments(
                 comment_obj = {
                     "comment_id": data["comment_id"],
                     "message": data["message"],
-                    "created_date": data["created_date"],
+                    "created_date": format_datetime(data["created_date"]),
                     "account": {
                         "id": data["account_id"],
                         "uuid": data["uuid"],
