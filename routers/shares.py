@@ -4,6 +4,7 @@ from lib.database import Database
 from sqlalchemy import insert, delete, select, func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from utils.session_utils import get_account_uuid_from_session
+from utils.datetime_utils import format_datetime
 from typing import Optional
 import json
 
@@ -334,7 +335,7 @@ async def get_user_shares(
                         "id": post_result.id,
                          "user_id": post_result.user_id,
                         "description": post_result.description,
-                        "created_date": post_result.created_date,
+                        "created_date": format_datetime(post_result.created_date),
                         "author_uuid": post_result.author_uuid,
                         "author_email": post_result.author_email,
                         "author_first_name": post_result.author_first_name,
@@ -410,8 +411,8 @@ async def get_user_shares(
                         "id": event_result.id,
                         "title": event_result.title,
                         "description": event_result.description,
-                        "event_date": event_result.event_date,
-                        "created_date": event_result.created_date,
+                        "event_date": format_datetime(event_result.event_date),
+                        "created_date": format_datetime(event_result.created_date),
                         "organization_name": event_result.organization_name,
                         "organization_id": event_result.organization_id,
                         "image": (
@@ -555,7 +556,7 @@ async def get_shares_for_content(
             share_data = {
                 "share_id": share.id,
                 "comment": share.comment,
-                "date_created": share.date_created,
+                "date_created": format_datetime(share.date_created),
                 "sharer": {
                     "id": share.sharer_id,
                     "organization_id": share.organization_id,
@@ -746,7 +747,7 @@ async def get_all_shares_with_comments(
                         "id": post_result.id,
                         "description": post_result.description,
                         "images": images,
-                        "created_date": post_result.created_date,
+                        "created_date": format_datetime(post_result.created_date),
                         "author": {
                             "uuid": post_result.author_uuid,
                             "email": post_result.author_email,
@@ -786,7 +787,7 @@ async def get_all_shares_with_comments(
                     comments = [{
                         "id": comment.id,
                         "message": comment.message,
-                        "created_date": comment.created_date,
+                        "created_date": format_datetime(comment.created_date),
                         "author": {
                             "uuid": comment.commenter_uuid,
                             "email": comment.commenter_email,
@@ -833,8 +834,8 @@ async def get_all_shares_with_comments(
                         "organization_id": event_result.organization_id,
                         "title": event_result.title,
                         "description": event_result.description,
-                        "event_date": event_result.event_date,
-                        "created_date": event_result.created_date,
+                        "event_date": format_datetime(event_result.event_date),
+                        "created_date": format_datetime(event_result.created_date),
                         "image": (
                             {
                                 "directory": event_result.event_image_directory,
