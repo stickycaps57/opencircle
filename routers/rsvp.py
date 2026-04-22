@@ -4,6 +4,7 @@ from sqlalchemy import insert, update, delete
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import Request
 from utils.session_utils import get_account_uuid_from_session
+from utils.datetime_utils import format_datetime
 from utils.notification_service import NotificationService
 
 
@@ -133,8 +134,8 @@ async def get_rsvps_for_event(
                     "event_id": data["event_id"],
                     "attendee": data["attendee"],
                     "status": data["status"],
-                    "created_date": data["created_date"],
-                    "last_modified_date": data["last_modified_date"],
+                    "created_date": format_datetime(data["created_date"]),
+                    "last_modified_date": format_datetime(data["last_modified_date"]),
                     "account_uuid": data["account_uuid"],
                     "user_id": data["user_id"],
                     "first_name": data["first_name"],
