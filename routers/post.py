@@ -20,6 +20,7 @@ from fastapi import Cookie
 from utils.session_utils import get_account_uuid_from_session
 from utils.profanity_filter import moderate_text
 from utils.notification_service import NotificationService
+from utils.datetime_utils import format_datetime
 import json
 
 
@@ -297,7 +298,7 @@ async def get_all_posts(
                         {
                             "comment_id": cdata["comment_id"],
                             "message": cdata["message"],
-                            "created_date": cdata["created_date"],
+                            "created_date": format_datetime(cdata["created_date"]),
                             "account": {
                                 "id": cdata["account_id"],
                                 "uuid": cdata["uuid"],
@@ -325,7 +326,7 @@ async def get_all_posts(
                         {
                             "comment_id": cdata["comment_id"],
                             "message": cdata["message"],
-                            "created_date": cdata["created_date"],
+                            "created_date": format_datetime(cdata["created_date"]),
                             "account": {
                                 "id": cdata["account_id"],
                                 "uuid": cdata["uuid"],
@@ -379,7 +380,7 @@ async def get_all_posts(
                     ),
                     "images": images,
                     "description": data["description"],
-                    "created_date": data["created_date"],
+                    "created_date": format_datetime(data["created_date"]),
                     "latest_comments": comments,
                     "total_comments": total_comments,
                 }
@@ -557,8 +558,8 @@ async def get_posts(
                     "author_id": data["author"],
                     "images": images,
                     "description": data["description"],
-                    "created_date": data["created_date"],
-                    "last_modified_date": data["last_modified_date"],
+                    "created_date": format_datetime(data["created_date"]),
+                    "last_modified_date": format_datetime(data["last_modified_date"]),
                 }
             )
         return {
@@ -761,7 +762,7 @@ async def get_posts_with_comments(
                         {
                             "comment_id": data["comment_id"],
                             "message": data["message"],
-                            "created_date": data["created_date"],
+                            "created_date": format_datetime(data["created_date"]),
                             "account": {
                                 "id": data["account_id"],
                                 "uuid": data["uuid"],
@@ -789,7 +790,7 @@ async def get_posts_with_comments(
                         {
                             "comment_id": data["comment_id"],
                             "message": data["message"],
-                            "created_date": data["created_date"],
+                            "created_date": format_datetime(data["created_date"]),
                             "account": {
                                 "id": data["account_id"],
                                 "uuid": data["uuid"],
@@ -1119,8 +1120,8 @@ async def get_single_post(
         post = {
             "id": data["id"],
             "description": data["description"],
-            "created_date": data["created_date"],
-            "last_modified_date": data["last_modified_date"],
+            "created_date": format_datetime(data["created_date"]),
+            "last_modified_date": format_datetime(data["last_modified_date"]),
             "author": {
                 "id": data["author"],
                 "uuid": data["author_uuid"],
