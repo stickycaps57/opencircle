@@ -7,6 +7,7 @@ from utils.session_utils import get_account_uuid_from_session
 from sqlalchemy import or_
 from sqlalchemy.sql import func
 from utils.notification_service import NotificationService
+from utils.datetime_utils import format_datetime
 
 router = APIRouter(
     prefix="/organization",
@@ -584,9 +585,9 @@ async def get_user_joined_organizations(
                     if org.logo_id
                     else None
                 ),
-                "organization_created_date": org.organization_created_date,
-                "membership_date": org.membership_date,
-                "membership_modified_date": org.membership_modified_date,
+                "organization_created_date": format_datetime(org.organization_created_date),
+                "membership_date": format_datetime(org.membership_date),
+                "membership_modified_date": format_datetime(org.membership_modified_date),
                 "account_uuid": org.organization_account_uuid,
                 "email": org.organization_email,
                 "stats": {
@@ -1307,7 +1308,7 @@ async def get_organization_profile(
                     "id": post_dict["id"],
                     "description": post_dict["description"],
                     "images": images,
-                    "created_date": post_dict["created_date"],
+                    "created_date": format_datetime(post_dict["created_date"]),
                 }
             )
 
@@ -1353,10 +1354,10 @@ async def get_organization_profile(
                 {
                     "id": event_dict["id"],
                     "title": event_dict["title"],
-                    "event_date": event_dict["event_date"],
+                    "event_date": format_datetime(event_dict["event_date"]),
                     "description": event_dict["description"],
                     "image": event_image,
-                    "created_date": event_dict["created_date"],
+                    "created_date": format_datetime(event_dict["created_date"]),
                 }
             )
 
@@ -1399,10 +1400,10 @@ async def get_organization_profile(
                 {
                     "id": event_dict["id"],
                     "title": event_dict["title"],
-                    "event_date": event_dict["event_date"],
+                    "event_date": format_datetime(event_dict["event_date"]),
                     "description": event_dict["description"],
                     "image": event_image,
-                    "created_date": event_dict["created_date"],
+                    "created_date": format_datetime(event_dict["created_date"]),
                 }
             )
 
