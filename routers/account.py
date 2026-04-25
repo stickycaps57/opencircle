@@ -29,6 +29,7 @@ from utils.session_utils import (
     delete_session,
     get_account_uuid_from_session,
 )
+from utils.datetime_utils import format_datetime
 
 
 router = APIRouter(
@@ -392,7 +393,7 @@ async def user_sign_in(
             "role_id": account["role_id"],  # Include role_id from account table
             "bypass_two_factor": account["bypass_two_factor"],
         },
-        "expires_at": expires_at.isoformat(),
+        "expires_at": format_datetime(expires_at),
     }
 
 
@@ -531,7 +532,7 @@ async def organization_sign_in(
             "role_id": account["role_id"],  # Include role_id from account table
             "bypass_two_factor": account["bypass_two_factor"],
         },
-        "expires_at": expires_at.isoformat(),
+        "expires_at": format_datetime(expires_at),
     }
 
 
@@ -844,7 +845,7 @@ async def verify_2fa(
                     "role_id": account["role_id"],
                     "bypass_two_factor": account["bypass_two_factor"],
                 },
-                "expires_at": expires_at.isoformat(),
+                "expires_at": format_datetime(expires_at),
             }
 
         elif account_type == "organization":
@@ -902,7 +903,7 @@ async def verify_2fa(
                     "role_id": account["role_id"],
                     "bypass_two_factor": account["bypass_two_factor"],
                 },
-                "expires_at": expires_at.isoformat(),
+                "expires_at": format_datetime(expires_at),
             }
         else:
             raise HTTPException(status_code=400, detail="Invalid account type")
