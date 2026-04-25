@@ -892,7 +892,7 @@ async def get_all_shares_with_comments(
                     comments = [{
                         "id": comment.id,
                         "message": comment.message,
-                        "created_date": comment.created_date,
+                        "created_date": format_datetime(comment.created_date),
                         "author": {
                             "uuid": comment.commenter_uuid,
                             "email": comment.commenter_email,

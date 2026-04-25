@@ -6,6 +6,7 @@ from sqlalchemy import insert, select, func
 from typing import Optional
 from utils.resource_utils import add_resource, delete_resource, get_resource
 from utils.session_utils import get_account_uuid_from_session
+from utils.datetime_utils import format_datetime
 import json
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
@@ -187,7 +188,7 @@ async def get_user_profile(
                 "id": post_dict["id"],
                 "description": post_dict["description"],
                 "images": images,
-                "created_date": post_dict["created_date"],
+                "created_date": format_datetime(post_dict["created_date"]),
             })
         
         # Get recent shares (last 5 shares)
@@ -368,7 +369,7 @@ async def get_user_profile(
                 if user_data["profile_picture_id"]
                 else None
             ),
-            "created_date": user_data["created_date"],
+            "created_date": format_datetime(user_data["created_date"]),
             "recent_posts": recent_posts,
             "recent_shares": recent_shares,
             "organizations": organizations,
