@@ -861,6 +861,9 @@ async def get_posts_with_comments(
             post_dict.pop("author_profile_picture_id", None)
             post_dict.pop("author_profile_picture_directory", None)
             post_dict.pop("author_profile_picture_filename", None)
+            # Format datetime fields
+            post_dict["created_date"] = format_datetime(post_dict["created_date"])
+            post_dict["last_modified_date"] = format_datetime(post_dict["last_modified_date"])
             posts.append(post_dict)
 
         return {
