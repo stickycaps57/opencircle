@@ -190,6 +190,9 @@ async def get_user_shares(
         shares = []
         for share in shares_result:
             share_data = dict(share._mapping)
+
+            # Format datetime fields
+            share_data["date_created"] = format_datetime(share_data["date_created"])
             
             # Get sharer details (logo and profile picture)
             org_logo_resource = table["resource"].alias("org_logo_resource")
@@ -944,7 +947,7 @@ async def get_all_shares_with_comments(
                 shares_with_content.append({
                     "share_id": share_data["id"],
                     "share_comment": share_data["comment"],
-                    "share_date": share_data["date_created"],
+                    "share_date": format_datetime(share_data["date_created"]),
                     "sharer": sharer_data,
                     "content": content_details,
                     "comments": comments,
