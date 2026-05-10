@@ -252,21 +252,3 @@ CREATE TABLE `goal_progress` (
   CONSTRAINT `goal_progress_goal_FK` FOREIGN KEY (`goal_id`) REFERENCES `goal` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
 
-CREATE TABLE `recommendation` (
-  `id` bigint(20) NOT NULL AUTO_INCREMENT,
-  `organization_id` bigint(20) NOT NULL,
-  `recommendation_type` enum('low_engagement','low_participation','membership_decline','low_event_attendance','announcement_decline') NOT NULL,
-  `title` varchar(255) NOT NULL,
-  `message` text NOT NULL,
-  `priority` enum('low','medium','high') NOT NULL DEFAULT 'medium',
-  `dismissed` tinyint(1) NULL DEFAULT 0,
-  `created_date` datetime NOT NULL DEFAULT current_timestamp(),
-  `dismissed_date` datetime DEFAULT NULL,
-  `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `recommendation_organization_FK` (`organization_id`),
-  KEY `recommendation_dismissed_IDX` (`dismissed`),
-  KEY `recommendation_created_date_IDX` (`created_date`),
-  CONSTRAINT `recommendation_organization_FK` FOREIGN KEY (`organization_id`) REFERENCES `organization` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
-
