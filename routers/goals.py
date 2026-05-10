@@ -277,6 +277,63 @@ def compute_and_sync_progress(session, goal):
     }
 
 
+def build_goal_details_payload(session, goal):
+    """Build goal payload with progress and target_reached for list/detail responses."""
+    # For automatable goal types, compute progress live from source data
+    live = compute_and_sync_progress(session, goal)
+
+    # Re-fetch goal to pick up any status change written by compute_and_sync_progress
+    goal = session.query(table["goal"]).filter_by(id=goal.id).first()
+
+    goal_dict = {
+        "id": goal.id,
+        "organization_id": goal.organization_id,
+        "goal_type": goal.goal_type,
+        "title": goal.title,
+        "target_value": goal.target_value,
+        "start_date": format_datetime(goal.start_date),
+        "end_date": format_datetime(goal.end_date),
+        "status": goal.status,
+        "created_date": format_datetime(goal.created_date),
+        "last_modified_date": format_datetime(goal.last_modified_date),
+    }
+
+    if live:
+        goal_dict["progress"] = live
+        progress_percentage = float(live.get("progress_percentage", 0.0))
+    else:
+        # Fall back to the last manually stored progress record
+        progress = (
+            session.query(table["goal_progress"])
+            .filter_by(goal_id=goal.id)
+            .order_by(table["goal_progress"].c.last_modified_date.desc())
+            .first()
+        )
+        if progress:
+            goal_dict["progress"] = {
+                "id": progress.id,
+                "current_value": progress.current_value,
+                "progress_percentage": float(progress.progress_percentage),
+                "updated_date": format_datetime(progress.last_modified_date),
+            }
+            progress_percentage = float(progress.progress_percentage)
+        else:
+            goal_dict["progress"] = {
+                "current_value": 0,
+                "progress_percentage": 0.0,
+            }
+            progress_percentage = 0.0
+
+    target_reached = None
+    now_utc = datetime.utcnow()
+    if _is_in_middle_timeframe(goal.start_date, goal.end_date, now_utc):
+        target_reached = 1 if progress_percentage >= 70 else 0
+
+    goal_dict["target_reached"] = target_reached
+
+    return goal_dict
+
+
 @router.post("/", tags=["Create Goal"])
 async def create_goal(
     organization_id: int = Form(...),
@@ -400,6 +457,9 @@ async def get_organization_goals(
     organization_id: int = Path(...),
     status: Optional[str] = Query(None),
     goal_type: Optional[str] = Query(None),
+    timeframe: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
     session_token: str = Cookie(None, alias="session_token"),
 ):
     """Get all goals for an organization with optional filtering"""
@@ -421,36 +481,55 @@ async def get_organization_goals(
             raise HTTPException(status_code=404, detail="Organization not found")
 
         # Build query
-        query = select(table["goal"]).where(
+        query = session.query(table["goal"]).filter(
             table["goal"].c.organization_id == organization_id
         )
 
         if status:
-            query = query.where(table["goal"].c.status == status)
+            query = query.filter(table["goal"].c.status == status)
         if goal_type:
-            query = query.where(table["goal"].c.goal_type == goal_type)
+            query = query.filter(table["goal"].c.goal_type == goal_type)
+        if timeframe:
+            valid_timeframes = ["past", "ongoing"]
+            if timeframe not in valid_timeframes:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid timeframe. Allowed values: past, ongoing",
+                )
 
-        goals = session.execute(query).fetchall()
+            now_utc = datetime.utcnow()
+            if timeframe == "past":
+                query = query.filter(table["goal"].c.end_date < now_utc)
+            elif timeframe == "ongoing":
+                query = query.filter(
+                    table["goal"].c.start_date <= now_utc,
+                    table["goal"].c.end_date >= now_utc,
+                )
+
+        total_count = query.count()
+        offset = (page - 1) * page_size
+
+        goals = (
+            query.order_by(table["goal"].c.created_date.desc())
+            .offset(offset)
+            .limit(page_size)
+            .all()
+        )
 
         goals_list = []
         for goal in goals:
-            goal_data = goal._mapping
-            goals_list.append(
-                {
-                    "id": goal_data["id"],
-                    "organization_id": goal_data["organization_id"],
-                    "goal_type": goal_data["goal_type"],
-                    "title": goal_data["title"],
-                    "target_value": goal_data["target_value"],
-                    "start_date": format_datetime(goal_data["start_date"]),
-                    "end_date": format_datetime(goal_data["end_date"]),
-                    "status": goal_data["status"],
-                    "created_date": format_datetime(goal_data["created_date"]),
-                    "last_modified_date": format_datetime(goal_data["last_modified_date"]),
-                }
-            )
+            goals_list.append(build_goal_details_payload(session, goal))
 
-        return {"goals": goals_list, "count": len(goals_list)}
+        total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 0
+
+        return {
+            "goals": goals_list,
+            "count": len(goals_list),
+            "page": page,
+            "page_size": page_size,
+            "total_count": total_count,
+            "total_pages": total_pages,
+        }
 
     except HTTPException as e:
         raise e
@@ -479,57 +558,7 @@ async def get_goal_details(
         if not goal:
             raise HTTPException(status_code=404, detail="Goal not found")
 
-        # For automatable goal types, compute progress live from source data
-        live = compute_and_sync_progress(session, goal)
-
-        # Re-fetch goal to pick up any status change written by compute_and_sync_progress
-        goal = session.query(table["goal"]).filter_by(id=goal_id).first()
-
-        goal_dict = {
-            "id": goal.id,
-            "organization_id": goal.organization_id,
-            "goal_type": goal.goal_type,
-            "title": goal.title,
-            "target_value": goal.target_value,
-            "start_date": format_datetime(goal.start_date),
-            "end_date": format_datetime(goal.end_date),
-            "status": goal.status,
-            "created_date": format_datetime(goal.created_date),
-            "last_modified_date": format_datetime(goal.last_modified_date),
-        }
-
-        if live:
-            goal_dict["progress"] = live
-            progress_percentage = float(live.get("progress_percentage", 0.0))
-        else:
-            # Fall back to the last manually stored progress record
-            progress = (
-                session.query(table["goal_progress"])
-                .filter_by(goal_id=goal_id)
-                .order_by(table["goal_progress"].c.last_modified_date.desc())
-                .first()
-            )
-            if progress:
-                goal_dict["progress"] = {
-                    "id": progress.id,
-                    "current_value": progress.current_value,
-                    "progress_percentage": float(progress.progress_percentage),
-                    "updated_date": format_datetime(progress.last_modified_date),
-                }
-                progress_percentage = float(progress.progress_percentage)
-            else:
-                goal_dict["progress"] = {
-                    "current_value": 0,
-                    "progress_percentage": 0.0,
-                }
-                progress_percentage = 0.0
-
-        target_reached = None
-        now_utc = datetime.utcnow()
-        if _is_in_middle_timeframe(goal.start_date, goal.end_date, now_utc):
-            target_reached = 1 if progress_percentage >= 70 else 0
-
-        goal_dict["target_reached"] = target_reached
+        goal_dict = build_goal_details_payload(session, goal)
 
         return goal_dict
 
@@ -783,6 +812,8 @@ async def update_goal_progress(
 @router.get("/{organization_id}/progress", tags=["Get All Goal Progress"])
 async def get_all_goal_progress(
     organization_id: int = Path(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
     session_token: str = Cookie(None, alias="session_token"),
 ):
     """Get progress for all goals in an organization"""
@@ -803,8 +834,17 @@ async def get_all_goal_progress(
         if not org:
             raise HTTPException(status_code=404, detail="Organization not found")
 
-        # Get all goals for organization with their progress
-        goals = session.query(table["goal"]).filter_by(organization_id=organization_id).all()
+        # Get paginated goals for organization with their progress
+        goals_query = session.query(table["goal"]).filter_by(organization_id=organization_id)
+        total_count = goals_query.count()
+        offset = (page - 1) * page_size
+
+        goals = (
+            goals_query.order_by(table["goal"].c.created_date.desc())
+            .offset(offset)
+            .limit(page_size)
+            .all()
+        )
 
         progress_list = []
         for goal in goals:
@@ -847,7 +887,17 @@ async def get_all_goal_progress(
         for item in progress_list:
             if "updated_date" in item:
                 item["updated_date"] = format_datetime(item["updated_date"])
-        return {"goals_progress": progress_list, "count": len(progress_list)}
+
+        total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 0
+
+        return {
+            "goals_progress": progress_list,
+            "count": len(progress_list),
+            "page": page,
+            "page_size": page_size,
+            "total_count": total_count,
+            "total_pages": total_pages,
+        }
 
     except HTTPException as e:
         raise e
