@@ -24,6 +24,11 @@ def _is_in_middle_timeframe(goal_start, goal_end, now_utc):
     return midpoint <= now_utc <= goal_end
 
 
+def _should_compute_live(goal, now_utc):
+    """Compute progress live only while the goal timeframe is still active."""
+    return bool(goal and goal.end_date and now_utc <= goal.end_date)
+
+
 def compute_and_sync_progress(session, goal):
     """
     For goals whose progress can be derived from existing data, compute the
@@ -279,8 +284,9 @@ def compute_and_sync_progress(session, goal):
 
 def build_goal_details_payload(session, goal):
     """Build goal payload with progress and target_reached for list/detail responses."""
-    # For automatable goal types, compute progress live from source data
-    live = compute_and_sync_progress(session, goal)
+    # For automatable goal types, compute progress live only for non-ended goals.
+    now_utc = datetime.utcnow()
+    live = compute_and_sync_progress(session, goal) if _should_compute_live(goal, now_utc) else None
 
     # Re-fetch goal to pick up any status change written by compute_and_sync_progress
     goal = session.query(table["goal"]).filter_by(id=goal.id).first()
@@ -323,8 +329,6 @@ def build_goal_details_payload(session, goal):
                 "progress_percentage": 0.0,
             }
             progress_percentage = 0.0
-
-    now_utc = datetime.utcnow()
 
     # target_reached semantics:
     # - True: threshold reached at any time
@@ -857,8 +861,9 @@ async def get_all_goal_progress(
 
         progress_list = []
         for goal in goals:
-            # For automatable goal types, compute progress live from source data
-            live = compute_and_sync_progress(session, goal)
+            # For automatable goal types, compute progress live only while goal is active.
+            now_utc = datetime.utcnow()
+            live = compute_and_sync_progress(session, goal) if _should_compute_live(goal, now_utc) else None
 
             # Re-fetch to pick up any status change
             goal = session.query(table["goal"]).filter_by(id=goal.id).first()
