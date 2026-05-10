@@ -240,7 +240,7 @@ def compute_and_sync_progress(session, goal):
             .values(
                 current_value=current_value,
                 progress_percentage=progress_percentage,
-                updated_date=updated_at,
+                last_modified_date=updated_at,
             )
         )
     else:
@@ -249,7 +249,7 @@ def compute_and_sync_progress(session, goal):
                 goal_id=goal.id,
                 current_value=current_value,
                 progress_percentage=progress_percentage,
-                updated_date=updated_at,
+                last_modified_date=updated_at,
             )
         )
 
@@ -481,7 +481,7 @@ async def get_goal_details(
             progress = (
                 session.query(table["goal_progress"])
                 .filter_by(goal_id=goal_id)
-                .order_by(table["goal_progress"].c.updated_date.desc())
+                .order_by(table["goal_progress"].c.last_modified_date.desc())
                 .first()
             )
             if progress:
@@ -489,7 +489,7 @@ async def get_goal_details(
                     "id": progress.id,
                     "current_value": progress.current_value,
                     "progress_percentage": float(progress.progress_percentage),
-                    "updated_date": format_datetime(progress.updated_date),
+                    "updated_date": format_datetime(progress.last_modified_date),
                 }
             else:
                 goal_dict["progress"] = {
@@ -666,7 +666,7 @@ async def update_goal_progress(
                 .values(
                     current_value=current_value,
                     progress_percentage=progress_percentage,
-                    updated_date=datetime.utcnow(),
+                    last_modified_date=datetime.utcnow(),
                 )
             )
             session.execute(stmt)
@@ -757,7 +757,7 @@ async def get_all_goal_progress(
                 progress = (
                     session.query(table["goal_progress"])
                     .filter_by(goal_id=goal.id)
-                    .order_by(table["goal_progress"].c.updated_date.desc())
+                    .order_by(table["goal_progress"].c.last_modified_date.desc())
                     .first()
                 )
                 if progress:
@@ -765,7 +765,7 @@ async def get_all_goal_progress(
                     progress_data["progress_percentage"] = float(
                         progress.progress_percentage
                     )
-                    progress_data["updated_date"] = format_datetime(progress.updated_date)
+                    progress_data["updated_date"] = format_datetime(progress.last_modified_date)
                 else:
                     progress_data["current_value"] = 0
                     progress_data["progress_percentage"] = 0.0
