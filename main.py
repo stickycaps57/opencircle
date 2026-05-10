@@ -27,6 +27,7 @@ try:
         notification,
         two_factor_auth,
         report,
+        goals,
     )
     print("All routers imported successfully")
 except Exception as e:
@@ -48,6 +49,7 @@ app.include_router(shares.router)
 app.include_router(notification.router)
 app.include_router(two_factor_auth.router)
 app.include_router(report.router)
+app.include_router(goals.router)
 
 # app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 

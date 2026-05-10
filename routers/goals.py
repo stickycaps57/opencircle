@@ -277,7 +277,6 @@ async def create_goal(
     target_value: int = Form(...),
     start_date: str = Form(...),
     end_date: str = Form(...),
-    description: Optional[str] = Form(None),
     session_token: str = Cookie(None, alias="session_token"),
 ):
     """Create a new goal for an organization"""
@@ -322,7 +321,6 @@ async def create_goal(
             organization_id=organization_id,
             goal_type=goal_type,
             title=title,
-            description=description,
             target_value=target_value,
             start_date=start_date,
             end_date=end_date,
@@ -346,7 +344,6 @@ async def create_goal(
             "goal_type": goal_type,
             "title": title,
             "target_value": target_value,
-            "description": description,
             "start_date": start_date,
             "end_date": end_date,
             "status": "in_progress",
@@ -409,7 +406,6 @@ async def get_organization_goals(
                     "organization_id": goal_data["organization_id"],
                     "goal_type": goal_data["goal_type"],
                     "title": goal_data["title"],
-                    "description": goal_data["description"],
                     "target_value": goal_data["target_value"],
                     "start_date": format_datetime(goal_data["start_date"]),
                     "end_date": format_datetime(goal_data["end_date"]),
@@ -462,7 +458,6 @@ async def get_goal_details(
             "organization_id": goal.organization_id,
             "goal_type": goal.goal_type,
             "title": goal.title,
-            "description": goal.description,
             "target_value": goal.target_value,
             "start_date": format_datetime(goal.start_date),
             "end_date": format_datetime(goal.end_date),
@@ -508,7 +503,6 @@ async def get_goal_details(
 async def update_goal(
     goal_id: int = Path(...),
     title: Optional[str] = Form(None),
-    description: Optional[str] = Form(None),
     target_value: Optional[int] = Form(None),
     start_date: Optional[str] = Form(None),
     end_date: Optional[str] = Form(None),
@@ -542,8 +536,6 @@ async def update_goal(
         update_values = {}
         if title is not None:
             update_values["title"] = title
-        if description is not None:
-            update_values["description"] = description
         if target_value is not None:
             update_values["target_value"] = target_value
         if start_date is not None:
