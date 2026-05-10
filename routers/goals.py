@@ -16,6 +16,58 @@ db = Database()
 table = db.tables
 
 
+RECOMMENDATION_CATALOG = {
+    "LOW_INTERACTIONS_COMMENTS": {
+        "title": "Low interactions or comments",
+        "message": "Member interaction is currently low. Consider posting more announcements or organizing interactive events.",
+        "priority": "high",
+    },
+    "LOW_EVENT_PARTICIPATION": {
+        "title": "Low event participation",
+        "message": "Recent events have low participation rates. Consider adjusting event schedules or increasing event promotion.",
+        "priority": "high",
+    },
+    "MEMBERSHIP_DECLINE": {
+        "title": "Membership decline",
+        "message": "Member departures currently exceed new registrations during this selected period.",
+        "priority": "high",
+    },
+    "HIGH_ENGAGEMENT": {
+        "title": "High engagement",
+        "message": "The organization currently demonstrates strong member engagement and participation.",
+        "priority": "low",
+    },
+    "LOW_POSTING_ACTIVITY": {
+        "title": "Low posting activity",
+        "message": "The organization currently has low posting activity. Consider posting announcements or updates more frequently.",
+        "priority": "high",
+    },
+}
+
+
+def _is_in_middle_timeframe(goal_start, goal_end, now_utc):
+    """Return True if current time is in the second half of the goal timeframe and before end."""
+    if not goal_start or not goal_end or goal_end <= goal_start:
+        return False
+    midpoint = goal_start + (goal_end - goal_start) / 2
+    return midpoint <= now_utc <= goal_end
+
+
+def _get_recommendation_code(goal_type, progress_percentage):
+    """Map goal type and progress to a frontend-friendly recommendation code."""
+    if progress_percentage >= 70:
+        return None
+
+    code_map = {
+        "engagement": "LOW_INTERACTIONS_COMMENTS",
+        "event_participation": "LOW_EVENT_PARTICIPATION",
+        "member_growth": "MEMBERSHIP_DECLINE",
+        "retention": "MEMBERSHIP_DECLINE",
+        "announcement_activity": "LOW_POSTING_ACTIVITY",
+    }
+    return code_map.get(goal_type)
+
+
 def compute_and_sync_progress(session, goal):
     """
     For goals whose progress can be derived from existing data, compute the
@@ -326,6 +378,23 @@ async def create_goal(
         if goal_type not in valid_goal_types:
             raise HTTPException(status_code=400, detail="Invalid goal_type")
 
+        # Prevent duplicate goals of the same type for the same date range (date-only match)
+        similar_goal = session.execute(
+            select(table["goal"].c.id)
+            .where(
+                table["goal"].c.organization_id == organization_id,
+                table["goal"].c.goal_type == goal_type,
+                func.date(table["goal"].c.start_date) == start_date_dt.date(),
+                func.date(table["goal"].c.end_date) == end_date_dt.date(),
+            )
+            .limit(1)
+        ).first()
+        if similar_goal:
+            raise HTTPException(
+                status_code=400,
+                detail="You've already created a similar goal.",
+            )
+
         # Insert goal
         stmt = insert(table["goal"]).values(
             organization_id=organization_id,
@@ -458,7 +527,6 @@ async def get_goal_details(
         live = compute_and_sync_progress(session, goal)
 
         # Re-fetch goal to pick up any status change written by compute_and_sync_progress
-        session.expire(goal)
         goal = session.query(table["goal"]).filter_by(id=goal_id).first()
 
         goal_dict = {
@@ -476,6 +544,7 @@ async def get_goal_details(
 
         if live:
             goal_dict["progress"] = live
+            progress_percentage = float(live.get("progress_percentage", 0.0))
         else:
             # Fall back to the last manually stored progress record
             progress = (
@@ -491,11 +560,31 @@ async def get_goal_details(
                     "progress_percentage": float(progress.progress_percentage),
                     "updated_date": format_datetime(progress.last_modified_date),
                 }
+                progress_percentage = float(progress.progress_percentage)
             else:
                 goal_dict["progress"] = {
                     "current_value": 0,
                     "progress_percentage": 0.0,
                 }
+                progress_percentage = 0.0
+
+        recommendation = {}
+        now_utc = datetime.utcnow()
+        if _is_in_middle_timeframe(goal.start_date, goal.end_date, now_utc):
+            code = _get_recommendation_code(goal.goal_type, progress_percentage)
+            if code:
+                template = RECOMMENDATION_CATALOG[code]
+                recommendation = {
+                    "recommendation_code": code,
+                    "recommendation_type": code,
+                    "title": template["title"],
+                    "message": template["message"],
+                    "priority": template["priority"],
+                    "progress_percentage": progress_percentage,
+                    "threshold_percentage": 70.0,
+                }
+
+        goal_dict["recommendation"] = recommendation
 
         return goal_dict
 
@@ -540,6 +629,44 @@ async def update_goal(
         if not account or account.id != organization.account_id:
             raise HTTPException(status_code=403, detail="Unauthorized")
 
+        # Parse dates if provided so update comparisons/storage are consistent
+        parsed_start_date = goal.start_date
+        parsed_end_date = goal.end_date
+        if start_date is not None:
+            try:
+                parsed_start_date = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid start_date format. Use ISO format, e.g. 2026-05-10 or 2026-05-10T00:00:00Z",
+                )
+        if end_date is not None:
+            try:
+                parsed_end_date = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid end_date format. Use ISO format, e.g. 2026-05-10 or 2026-05-10T00:00:00Z",
+                )
+
+        # Prevent creating a duplicate date-range goal via updates (same org + type + date-only range)
+        similar_goal = session.execute(
+            select(table["goal"].c.id)
+            .where(
+                table["goal"].c.organization_id == goal.organization_id,
+                table["goal"].c.goal_type == goal.goal_type,
+                func.date(table["goal"].c.start_date) == parsed_start_date.date(),
+                func.date(table["goal"].c.end_date) == parsed_end_date.date(),
+                table["goal"].c.id != goal_id,
+            )
+            .limit(1)
+        ).first()
+        if similar_goal:
+            raise HTTPException(
+                status_code=400,
+                detail="You've already created a similar goal.",
+            )
+
         # Build update values
         update_values = {}
         if title is not None:
@@ -547,9 +674,9 @@ async def update_goal(
         if target_value is not None:
             update_values["target_value"] = target_value
         if start_date is not None:
-            update_values["start_date"] = start_date
+            update_values["start_date"] = parsed_start_date
         if end_date is not None:
-            update_values["end_date"] = end_date
+            update_values["end_date"] = parsed_end_date
         if status is not None:
             valid_statuses = ["achieved", "in_progress", "behind_target"]
             if status not in valid_statuses:
@@ -740,7 +867,6 @@ async def get_all_goal_progress(
             live = compute_and_sync_progress(session, goal)
 
             # Re-fetch to pick up any status change
-            session.expire(goal)
             goal = session.query(table["goal"]).filter_by(id=goal.id).first()
 
             progress_data = {
@@ -785,210 +911,3 @@ async def get_all_goal_progress(
     finally:
         session.close()
 
-
-@router.post("/{organization_id}/recommendations", tags=["Create Recommendation"])
-async def create_recommendation(
-    organization_id: int = Path(...),
-    recommendation_type: str = Form(...),
-    title: str = Form(...),
-    message: str = Form(...),
-    priority: str = Form("medium"),
-    session_token: str = Cookie(None, alias="session_token"),
-):
-    """Create a recommendation for an organization"""
-    session = db.session
-
-    try:
-        if not session_token:
-            raise HTTPException(status_code=401, detail="Authentication required")
-
-        account_uuid = get_account_uuid_from_session(session_token)
-
-        # Verify the user owns the organization
-        organization_query = (
-            select(table["organization"].c.id, table["organization"].c.account_id)
-            .where(table["organization"].c.id == organization_id)
-        )
-        org_result = session.execute(organization_query).first()
-
-        if not org_result:
-            raise HTTPException(status_code=404, detail="Organization not found")
-
-        org_account_id = org_result._mapping["account_id"]
-
-        # Verify the account matches
-        account = session.query(table["account"]).filter_by(uuid=account_uuid).first()
-        if not account or account.id != org_account_id:
-            raise HTTPException(status_code=403, detail="Unauthorized")
-
-        # Validate recommendation_type
-        valid_types = [
-            "low_engagement",
-            "low_participation",
-            "membership_decline",
-            "low_event_attendance",
-            "announcement_decline",
-        ]
-        if recommendation_type not in valid_types:
-            raise HTTPException(status_code=400, detail="Invalid recommendation_type")
-
-        # Validate priority
-        valid_priorities = ["low", "medium", "high"]
-        if priority not in valid_priorities:
-            raise HTTPException(status_code=400, detail="Invalid priority")
-
-        # Insert recommendation
-        stmt = insert(table["recommendation"]).values(
-            organization_id=organization_id,
-            recommendation_type=recommendation_type,
-            title=title,
-            message=message,
-            priority=priority,
-            dismissed=False,
-        )
-
-        result = session.execute(stmt)
-        session.commit()
-        recommendation_id = result.inserted_primary_key[0]
-
-        return {
-            "id": recommendation_id,
-            "organization_id": organization_id,
-            "recommendation_type": recommendation_type,
-            "title": title,
-            "message": message,
-            "priority": priority,
-            "dismissed": False,
-            "created_date": format_datetime(datetime.utcnow()),
-            "message": "Recommendation created successfully",
-        }
-
-    except HTTPException as e:
-        session.rollback()
-        raise e
-    except SQLAlchemyError as e:
-        session.rollback()
-        raise HTTPException(status_code=500, detail="Database error: " + str(e))
-    finally:
-        session.close()
-
-
-@router.get("/{organization_id}/recommendations", tags=["Get Recommendations"])
-async def get_recommendations(
-    organization_id: int = Path(...),
-    dismissed: Optional[bool] = Query(None),
-    priority: Optional[str] = Query(None),
-    session_token: str = Cookie(None, alias="session_token"),
-):
-    """Get recommendations for an organization"""
-    session = db.session
-
-    try:
-        if not session_token:
-            raise HTTPException(status_code=401, detail="Authentication required")
-
-        account_uuid = get_account_uuid_from_session(session_token)
-
-        # Verify organization exists
-        org = (
-            session.query(table["organization"])
-            .filter_by(id=organization_id)
-            .first()
-        )
-        if not org:
-            raise HTTPException(status_code=404, detail="Organization not found")
-
-        # Build query
-        query = select(table["recommendation"]).where(
-            table["recommendation"].c.organization_id == organization_id
-        )
-
-        if dismissed is not None:
-            query = query.where(table["recommendation"].c.dismissed == dismissed)
-        if priority:
-            query = query.where(table["recommendation"].c.priority == priority)
-
-        recommendations = session.execute(query).fetchall()
-
-        recommendations_list = []
-        for rec in recommendations:
-            rec_data = rec._mapping
-            recommendations_list.append(
-                {
-                    "id": rec_data["id"],
-                    "organization_id": rec_data["organization_id"],
-                    "recommendation_type": rec_data["recommendation_type"],
-                    "title": rec_data["title"],
-                    "message": rec_data["message"],
-                    "priority": rec_data["priority"],
-                    "dismissed": rec_data["dismissed"],
-                    "created_date": format_datetime(rec_data["created_date"]),
-                    "dismissed_date": format_datetime(rec_data["dismissed_date"]),
-                }
-            )
-
-        return {
-            "recommendations": recommendations_list,
-            "count": len(recommendations_list),
-        }
-
-    except HTTPException as e:
-        raise e
-    except SQLAlchemyError as e:
-        raise HTTPException(status_code=500, detail="Database error: " + str(e))
-    finally:
-        session.close()
-
-
-@router.put("/recommendations/{recommendation_id}/dismiss", tags=["Dismiss Recommendation"])
-async def dismiss_recommendation(
-    recommendation_id: int = Path(...),
-    session_token: str = Cookie(None, alias="session_token"),
-):
-    """Dismiss a recommendation"""
-    session = db.session
-
-    try:
-        if not session_token:
-            raise HTTPException(status_code=401, detail="Authentication required")
-
-        account_uuid = get_account_uuid_from_session(session_token)
-
-        # Get recommendation and verify ownership
-        rec = (
-            session.query(table["recommendation"]).filter_by(id=recommendation_id).first()
-        )
-        if not rec:
-            raise HTTPException(status_code=404, detail="Recommendation not found")
-
-        organization = (
-            session.query(table["organization"])
-            .filter_by(id=rec.organization_id)
-            .first()
-        )
-        account = session.query(table["account"]).filter_by(uuid=account_uuid).first()
-        if not account or account.id != organization.account_id:
-            raise HTTPException(status_code=403, detail="Unauthorized")
-
-        # Update recommendation
-        stmt = (
-            update(table["recommendation"])
-            .where(table["recommendation"].c.id == recommendation_id)
-            .values(dismissed=True, dismissed_date=datetime.utcnow())
-        )
-        session.execute(stmt)
-        session.commit()
-
-        return {
-            "message": "Recommendation dismissed successfully",
-            "recommendation_id": recommendation_id,
-        }
-
-    except HTTPException as e:
-        session.rollback()
-        raise e
-    except SQLAlchemyError as e:
-        session.rollback()
-        raise HTTPException(status_code=500, detail="Database error: " + str(e))
-    finally:
-        session.close()
