@@ -29,6 +29,18 @@ def _should_compute_live(goal, now_utc):
     return bool(goal and goal.end_date and now_utc <= goal.end_date)
 
 
+def _ensure_goal_status_is_correct(session, goal, now_utc):
+    """For ended goals, ensure status reflects reality (achieved or behind_target)."""
+    if goal.end_date and now_utc > goal.end_date and goal.status not in ["achieved"]:
+        # Timeframe has passed; if not achieved, mark as behind_target
+        session.execute(
+            update(table["goal"])
+            .where(table["goal"].c.id == goal.id)
+            .values(status="behind_target")
+        )
+        session.commit()
+
+
 def compute_and_sync_progress(session, goal):
     """
     For goals whose progress can be derived from existing data, compute the
@@ -289,6 +301,12 @@ def build_goal_details_payload(session, goal):
     live = compute_and_sync_progress(session, goal) if _should_compute_live(goal, now_utc) else None
 
     # Re-fetch goal to pick up any status change written by compute_and_sync_progress
+    goal = session.query(table["goal"]).filter_by(id=goal.id).first()
+
+    # Ensure status is correct for ended goals that weren't recomputed
+    _ensure_goal_status_is_correct(session, goal, now_utc)
+    
+    # Re-fetch if status was just corrected
     goal = session.query(table["goal"]).filter_by(id=goal.id).first()
 
     goal_dict = {
