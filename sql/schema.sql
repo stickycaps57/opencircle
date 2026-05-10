@@ -220,3 +220,53 @@ CREATE TABLE `notification` (
   KEY `notification_created_date_IDX` (`created_date`) USING BTREE,
   CONSTRAINT `notification_recipient_FK` FOREIGN KEY (`recipient_id`) REFERENCES `account` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+
+CREATE TABLE `goal` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `organization_id` bigint(20) NOT NULL,
+  `goal_type` enum('member_growth','event_participation','engagement','announcement_activity','retention') NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `target_value` int(11) NOT NULL,
+  `start_date` datetime NOT NULL,
+  `end_date` datetime NOT NULL,
+  `status` enum('achieved','in_progress','behind_target') NOT NULL DEFAULT 'in_progress',
+  `created_date` datetime NOT NULL DEFAULT current_timestamp(),
+  `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `goal_organization_FK` (`organization_id`),
+  KEY `goal_status_IDX` (`status`),
+  KEY `goal_date_range_IDX` (`start_date`,`end_date`),
+  CONSTRAINT `goal_organization_FK` FOREIGN KEY (`organization_id`) REFERENCES `organization` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+
+CREATE TABLE `goal_progress` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `goal_id` bigint(20) NOT NULL,
+  `current_value` int(11) NOT NULL DEFAULT 0,
+  `progress_percentage` decimal(5,2) NOT NULL DEFAULT 0.00,
+  `created_date` datetime NOT NULL DEFAULT current_timestamp(),
+  `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `goal_progress_goal_FK` (`goal_id`),
+  KEY `goal_progress_last_modified_IDX` (`last_modified_date`),
+  CONSTRAINT `goal_progress_goal_FK` FOREIGN KEY (`goal_id`) REFERENCES `goal` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+
+CREATE TABLE `recommendation` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `organization_id` bigint(20) NOT NULL,
+  `recommendation_type` enum('low_engagement','low_participation','membership_decline','low_event_attendance','announcement_decline') NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `message` text NOT NULL,
+  `priority` enum('low','medium','high') NOT NULL DEFAULT 'medium',
+  `dismissed` tinyint(1) NULL DEFAULT 0,
+  `created_date` datetime NOT NULL DEFAULT current_timestamp(),
+  `dismissed_date` datetime DEFAULT NULL,
+  `last_modified_date` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `recommendation_organization_FK` (`organization_id`),
+  KEY `recommendation_dismissed_IDX` (`dismissed`),
+  KEY `recommendation_created_date_IDX` (`created_date`),
+  CONSTRAINT `recommendation_organization_FK` FOREIGN KEY (`organization_id`) REFERENCES `organization` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf32 COLLATE=utf32_bin;
+
