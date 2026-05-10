@@ -305,6 +305,16 @@ async def create_goal(
         if not account or account.id != org_account_id:
             raise HTTPException(status_code=403, detail="Unauthorized")
 
+        # Normalize and validate date inputs so API responses always use ISO datetime format
+        try:
+            start_date_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            end_date_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid date format. Use ISO format, e.g. 2026-05-10 or 2026-05-10T00:00:00Z",
+            )
+
         # Validate goal_type
         valid_goal_types = [
             "member_growth",
@@ -322,8 +332,8 @@ async def create_goal(
             goal_type=goal_type,
             title=title,
             target_value=target_value,
-            start_date=start_date,
-            end_date=end_date,
+            start_date=start_date_dt,
+            end_date=end_date_dt,
             status="in_progress",
         )
 
@@ -344,8 +354,8 @@ async def create_goal(
             "goal_type": goal_type,
             "title": title,
             "target_value": target_value,
-            "start_date": format_datetime(start_date),
-            "end_date": format_datetime(end_date),
+            "start_date": format_datetime(start_date_dt),
+            "end_date": format_datetime(end_date_dt),
             "status": "in_progress",
             "message": "Goal created successfully",
         }
