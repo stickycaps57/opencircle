@@ -344,8 +344,8 @@ async def create_goal(
             "goal_type": goal_type,
             "title": title,
             "target_value": target_value,
-            "start_date": start_date,
-            "end_date": end_date,
+            "start_date": format_datetime(start_date),
+            "end_date": format_datetime(end_date),
             "status": "in_progress",
             "message": "Goal created successfully",
         }
@@ -411,9 +411,7 @@ async def get_organization_goals(
                     "end_date": format_datetime(goal_data["end_date"]),
                     "status": goal_data["status"],
                     "created_date": format_datetime(goal_data["created_date"]),
-                    "last_modified_date": format_datetime(
-                        goal_data["last_modified_date"]
-                    ),
+                    "last_modified_date": format_datetime(goal_data["last_modified_date"]),
                 }
             )
 
@@ -764,6 +762,10 @@ async def get_all_goal_progress(
 
             progress_list.append(progress_data)
 
+        # Ensure all date fields in progress_list are formatted
+        for item in progress_list:
+            if "updated_date" in item:
+                item["updated_date"] = format_datetime(item["updated_date"])
         return {"goals_progress": progress_list, "count": len(progress_list)}
 
     except HTTPException as e:
@@ -847,6 +849,7 @@ async def create_recommendation(
             "message": message,
             "priority": priority,
             "dismissed": False,
+            "created_date": format_datetime(datetime.utcnow()),
             "message": "Recommendation created successfully",
         }
 
