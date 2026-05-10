@@ -16,56 +16,12 @@ db = Database()
 table = db.tables
 
 
-RECOMMENDATION_CATALOG = {
-    "LOW_INTERACTIONS_COMMENTS": {
-        "title": "Low interactions or comments",
-        "message": "Member interaction is currently low. Consider posting more announcements or organizing interactive events.",
-        "priority": "high",
-    },
-    "LOW_EVENT_PARTICIPATION": {
-        "title": "Low event participation",
-        "message": "Recent events have low participation rates. Consider adjusting event schedules or increasing event promotion.",
-        "priority": "high",
-    },
-    "MEMBERSHIP_DECLINE": {
-        "title": "Membership decline",
-        "message": "Member departures currently exceed new registrations during this selected period.",
-        "priority": "high",
-    },
-    "HIGH_ENGAGEMENT": {
-        "title": "High engagement",
-        "message": "The organization currently demonstrates strong member engagement and participation.",
-        "priority": "low",
-    },
-    "LOW_POSTING_ACTIVITY": {
-        "title": "Low posting activity",
-        "message": "The organization currently has low posting activity. Consider posting announcements or updates more frequently.",
-        "priority": "high",
-    },
-}
-
-
 def _is_in_middle_timeframe(goal_start, goal_end, now_utc):
     """Return True if current time is in the second half of the goal timeframe and before end."""
     if not goal_start or not goal_end or goal_end <= goal_start:
         return False
     midpoint = goal_start + (goal_end - goal_start) / 2
     return midpoint <= now_utc <= goal_end
-
-
-def _get_recommendation_code(goal_type, progress_percentage):
-    """Map goal type and progress to a frontend-friendly recommendation code."""
-    if progress_percentage >= 70:
-        return None
-
-    code_map = {
-        "engagement": "LOW_INTERACTIONS_COMMENTS",
-        "event_participation": "LOW_EVENT_PARTICIPATION",
-        "member_growth": "MEMBERSHIP_DECLINE",
-        "retention": "MEMBERSHIP_DECLINE",
-        "announcement_activity": "LOW_POSTING_ACTIVITY",
-    }
-    return code_map.get(goal_type)
 
 
 def compute_and_sync_progress(session, goal):
@@ -568,23 +524,12 @@ async def get_goal_details(
                 }
                 progress_percentage = 0.0
 
-        recommendation = {}
+        target_reached = None
         now_utc = datetime.utcnow()
         if _is_in_middle_timeframe(goal.start_date, goal.end_date, now_utc):
-            code = _get_recommendation_code(goal.goal_type, progress_percentage)
-            if code:
-                template = RECOMMENDATION_CATALOG[code]
-                recommendation = {
-                    "recommendation_code": code,
-                    "recommendation_type": code,
-                    "title": template["title"],
-                    "message": template["message"],
-                    "priority": template["priority"],
-                    "progress_percentage": progress_percentage,
-                    "threshold_percentage": 70.0,
-                }
+            target_reached = 1 if progress_percentage >= 70 else 0
 
-        goal_dict["recommendation"] = recommendation
+        goal_dict["target_reached"] = target_reached
 
         return goal_dict
 
