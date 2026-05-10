@@ -324,10 +324,19 @@ def build_goal_details_payload(session, goal):
             }
             progress_percentage = 0.0
 
-    target_reached = None
     now_utc = datetime.utcnow()
-    if _is_in_middle_timeframe(goal.start_date, goal.end_date, now_utc):
-        target_reached = 1 if progress_percentage >= 70 else 0
+
+    # target_reached semantics:
+    # - True: threshold reached at any time
+    # - None: before midpoint and threshold not reached yet
+    # - False: at/after midpoint and threshold still not reached
+    if progress_percentage >= 70:
+        target_reached = True
+    elif goal.start_date and goal.end_date and goal.end_date > goal.start_date:
+        midpoint = goal.start_date + (goal.end_date - goal.start_date) / 2
+        target_reached = False if now_utc >= midpoint else None
+    else:
+        target_reached = False
 
     goal_dict["target_reached"] = target_reached
 
