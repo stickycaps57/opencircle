@@ -3543,6 +3543,13 @@ async def get_event_by_id(
         total_members = session.execute(members_count_stmt).scalar() or 0
         event_data["total_members"] = total_members
 
+        # Ensure event date fields are returned in consistent API datetime format.
+        event_data["event_date"] = format_datetime(event_data.get("event_date"))
+        event_data["created_date"] = format_datetime(event_data.get("created_date"))
+        event_data["last_modified_date"] = format_datetime(
+            event_data.get("last_modified_date")
+        )
+
         return event_data
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
