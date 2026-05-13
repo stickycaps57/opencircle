@@ -240,19 +240,21 @@ def compute_and_sync_progress(session, goal):
 
     # Determine status
     now = datetime.utcnow()
+    goal_ended = goal.end_date and now > goal.end_date
     if goal.goal_type == "retention":
-        if current_value <= goal.target_value:
-            new_status = "achieved"
-        elif now > goal.end_date:
-            new_status = "behind_target"
-        else:
+        if not goal_ended:
             new_status = "in_progress"
+        elif current_value <= goal.target_value:
+            new_status = "achieved"
+        else:
+            new_status = "behind_target"
+    elif not goal_ended:
+        # Goal is still ongoing — always in_progress regardless of percentage
+        new_status = "in_progress"
     elif progress_percentage >= 100:
         new_status = "achieved"
-    elif now > goal.end_date:
-        new_status = "behind_target"
     else:
-        new_status = "in_progress"
+        new_status = "behind_target"
 
     updated_at = datetime.utcnow()
 
@@ -811,10 +813,14 @@ async def update_goal_progress(
             session.execute(stmt)
 
         # Update goal status based on progress
-        if progress_percentage >= 100:
+        now_utc = datetime.utcnow()
+        goal_ended = goal.end_date and now_utc > goal.end_date
+        if not goal_ended:
+            new_status = "in_progress"
+        elif progress_percentage >= 100:
             new_status = "achieved"
         else:
-            new_status = "in_progress"
+            new_status = "behind_target"
 
         stmt = (
             update(table["goal"]).where(table["goal"].c.id == goal_id).values(status=new_status)
