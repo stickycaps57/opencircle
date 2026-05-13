@@ -1694,6 +1694,9 @@ async def get_events_by_month_year(
         for row in past_events_result:
             event = dict(row._mapping)
             event_id = event["id"]
+            event["event_date"] = format_datetime(event.get("event_date"))
+            event["created_date"] = format_datetime(event.get("created_date"))
+            event["last_modified_date"] = format_datetime(event.get("last_modified_date"))
             event["image"] = (
                 {
                     "id": event["image"],
@@ -1853,7 +1856,9 @@ async def get_events_by_month_year(
                     {
                         "comment_id": row_comment._mapping["comment_id"],
                         "message": row_comment._mapping["message"],
-                        "created_date": row_comment._mapping["created_date"],
+                        "created_date": format_datetime(
+                            row_comment._mapping["created_date"]
+                        ),
                         "account": {
                             "id": row_comment._mapping["account_id"],
                             "uuid": row_comment._mapping["uuid"],
@@ -1924,6 +1929,9 @@ async def get_events_by_month_year(
         for row in active_events_result:
             event = dict(row._mapping)
             event_id = event["id"]
+            event["event_date"] = format_datetime(event.get("event_date"))
+            event["created_date"] = format_datetime(event.get("created_date"))
+            event["last_modified_date"] = format_datetime(event.get("last_modified_date"))
             event["image"] = (
                 {
                     "id": event["image"],
@@ -2083,7 +2091,9 @@ async def get_events_by_month_year(
                     {
                         "comment_id": row_comment._mapping["comment_id"],
                         "message": row_comment._mapping["message"],
-                        "created_date": row_comment._mapping["created_date"],
+                        "created_date": format_datetime(
+                            row_comment._mapping["created_date"]
+                        ),
                         "account": {
                             "id": row_comment._mapping["account_id"],
                             "uuid": row_comment._mapping["uuid"],
@@ -2149,6 +2159,9 @@ async def get_events_by_status_with_comments(
 
         # For each event, get top 3 latest comments
         for event in events:
+            event["event_date"] = format_datetime(event.get("event_date"))
+            event["created_date"] = format_datetime(event.get("created_date"))
+            event["last_modified_date"] = format_datetime(event.get("last_modified_date"))
             event_id = event["id"]
             comments_stmt = (
                 select(
@@ -2183,7 +2196,9 @@ async def get_events_by_status_with_comments(
                     {
                         "comment_id": row._mapping["comment_id"],
                         "message": row._mapping["message"],
-                        "created_date": row._mapping["created_date"],
+                        "created_date": format_datetime(
+                            row._mapping["created_date"]
+                        ),
                         "account": {
                             "id": row._mapping["account_id"],
                             "uuid": row._mapping["uuid"],
@@ -2914,6 +2929,9 @@ async def get_user_events_with_comments(
         events = []
         for row in events_result:
             event = dict(row._mapping)
+            event["event_date"] = format_datetime(event.get("event_date"))
+            event["created_date"] = format_datetime(event.get("created_date"))
+            event["last_modified_date"] = format_datetime(event.get("last_modified_date"))
             event["address"] = {
                 "id": event.get("address_id"),
                 "country": event.get("address_country"),
@@ -3204,6 +3222,9 @@ async def get_user_events_by_rsvp_status_with_comments(
         events = []
         for row in events_result:
             event = dict(row._mapping)
+            event["event_date"] = format_datetime(event.get("event_date"))
+            event["created_date"] = format_datetime(event.get("created_date"))
+            event["last_modified_date"] = format_datetime(event.get("last_modified_date"))
             event["address"] = {
                 "id": event.get("address_id"),
                 "country": event.get("address_country"),
@@ -3717,6 +3738,12 @@ async def get_event_by_id_with_comments(
         )
         total_comments = session.execute(comment_count_stmt).scalar() or 0
         event_data["total_comments"] = total_comments
+
+        event_data["event_date"] = format_datetime(event_data.get("event_date"))
+        event_data["created_date"] = format_datetime(event_data.get("created_date"))
+        event_data["last_modified_date"] = format_datetime(
+            event_data.get("last_modified_date")
+        )
         
         # Fetch top 3 latest comments with commenter details
         comment_profile_resource = table["resource"].alias("comment_profile_resource")
@@ -3918,6 +3945,9 @@ async def get_user_past_events_with_comments(
         events = []
         for row in events_result:
             event = dict(row._mapping)
+            event["event_date"] = format_datetime(event.get("event_date"))
+            event["created_date"] = format_datetime(event.get("created_date"))
+            event["last_modified_date"] = format_datetime(event.get("last_modified_date"))
             event["address"] = {
                 "id": event.get("address_id"),
                 "country": event.get("address_country"),
