@@ -228,12 +228,12 @@ def compute_and_sync_progress(session, goal):
     if goal.goal_type == "retention":
         # Lower leave rate is better for retention goals
         if goal.target_value > 0:
-            progress_percentage = min((goal.target_value / max(current_value, 1)) * 100, 100)
+              progress_percentage = round(min((goal.target_value / max(current_value, 1)) * 100, 100), 2)
         else:
-            progress_percentage = 100 if current_value == 0 else 0
+              progress_percentage = 100.0 if current_value == 0 else 0.0
     else:
         progress_percentage = (
-            min(current_value / goal.target_value * 100, 100)
+              round(min(current_value / goal.target_value * 100, 100), 2)
             if goal.target_value > 0
             else 0
         )
