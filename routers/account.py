@@ -367,7 +367,6 @@ async def user_sign_in(
         samesite="Lax",
         # samesite="None",
         path="/",
-        expires=expires_at,
     )
 
     # Return user details (do NOT return session token in body)
@@ -506,7 +505,6 @@ async def organization_sign_in(
         samesite="Lax",
         # samesite="None",
         path="/",
-        expires=expires_at,
     )
 
     # Return organization details (do NOT return session token in body)
@@ -784,7 +782,6 @@ async def verify_2fa(
             samesite="Lax",
             # samesite="None",  
             path="/",
-            expires=expires_at,
         )
 
         # Return appropriate account details based on type

@@ -107,8 +107,20 @@ def get_account_uuid_from_session(session_token: str) -> str:
         session_row = session.execute(stmt).first()
         if not session_row:
             raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+        # Sliding expiration: keep active sessions alive by extending expiry on use.
+        new_expires_at = now + timedelta(minutes=SESSION_DURATION_MINUTES)
+        refresh_stmt = (
+            update(table["session"])
+            .where(table["session"].c.session_token == session_token)
+            .values(last_activity=now, expires_at=new_expires_at)
+        )
+        session.execute(refresh_stmt)
+        session.commit()
+
         return session_row._mapping["account_uuid"]
     except SQLAlchemyError as e:
+        session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
